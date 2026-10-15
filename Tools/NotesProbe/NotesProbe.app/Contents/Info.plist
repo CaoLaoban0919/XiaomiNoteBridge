@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>NotesProbe</string>
+<key>CFBundleIdentifier</key><string>local.minotebridge.notesprobe</string>
+<key>CFBundleName</key><string>米记桥验证</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>1.0</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSAppleEventsUsageDescription</key>
+<string>米记桥验证工具需要自建测试文件夹，以确认备忘录的文件夹结构行为。</string>
+</dict></plist>

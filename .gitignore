@@ -60,3 +60,15 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# macOS
+.DS_Store
+
+# Swift Package Manager 缓存
+.swiftpm/
+
+# 本项目 build.sh 的输出目录（.app / .dmg / iconset，可由脚本重新生成）
+build/
+
+# 运行时凭据（应用写入 Application Support，此处为防御性忽略）
+credentials.json

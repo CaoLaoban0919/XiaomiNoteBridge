@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>MiNoteBridge</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.minotebridge.app</string>
+	<key>CFBundleName</key>
+	<string>米记桥</string>
+	<key>CFBundleDisplayName</key>
+	<string>米记桥</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT License</string>
+
+	<!-- 协议第 5A(i) 条：这段文字会原样出现在 macOS 的授权弹窗里，务必与协议一致 -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>米记桥需要控制「备忘录」以完成三件事：核验笔记是否导入成功、记住笔记之间的对应关系、以及在你于小米端修改笔记后更新备忘录中的对应条目。它不会读取或修改你自行创建的备忘录。</string>
+
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>当你选择把导出的 .enex 文件保存到桌面时，米记桥需要访问该文件夹。</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>当你选择把导出的 .enex 文件保存到文稿文件夹时，米记桥需要访问该文件夹。</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>当你选择把导出的 .enex 文件保存到下载文件夹时，米记桥需要访问该文件夹。</string>
+</dict>
+</plist>
