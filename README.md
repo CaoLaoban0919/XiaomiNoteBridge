@@ -1,0 +1,2 @@
+# XiaomiNoteBridge
+用于将Apple笔记与小米笔记进行同步的项目，可以将小米云上的笔记下载保存到Apple笔记中并且可以进行更改
