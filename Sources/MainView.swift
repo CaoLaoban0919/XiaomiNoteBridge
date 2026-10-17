@@ -128,6 +128,8 @@ struct MainView: View {
     @State private var noteBodyHeight: CGFloat = 0
     /// 原文 WebView 量出来的实际高度
     @State private var originalBodyHeight: CGFloat = 0
+    /// 正文编辑器的工具栏指令（加粗、插图…），执行后编辑器自己清空
+    @State private var editorCommand: NoteEditorCommand?
     /// 用户手动拖出来的 AI 区高度。为 nil 时走自动计算。
     ///
     /// 为什么不直接改自动公式：用户一旦手动定过高度，说明他对"多少够用"
@@ -590,7 +592,8 @@ struct MainView: View {
 
                 WebNoteEditor(html: $originalHTML,
                               images: noteImages,
-                              contentHeight: $originalBodyHeight)
+                              contentHeight: $originalBodyHeight,
+                              command: $editorCommand)
                     .frame(height: max(originalBodyHeight, 240))
             }
         } else {
@@ -617,9 +620,12 @@ struct MainView: View {
                 // （字体变 Times、`<br>` 变段落、颜色漂移）。
                 // 图片：fileid 进编辑器换成内联图显示，导出按字节指纹换回 fileid，
                 // 删图 = 输出里没有对应标签 = 写回时真的删除。
+                editorToolbar
+
                 WebNoteEditor(html: $noteHTML,
                               images: noteImages,
-                              contentHeight: $noteBodyHeight)
+                              contentHeight: $noteBodyHeight,
+                              command: $editorCommand)
                     // **高度必须用页面量出来的值。**
                     // 写成 `.frame(minHeight: 240)` 时，WKWebView 因为没有固有高度
                     // 就只占 240，剩下的正文被关进它自己的内部滚动区，
@@ -711,6 +717,60 @@ struct MainView: View {
                 showToast("写入失败：\(error.localizedDescription)")
             }
         }
+    }
+
+    /// 正文编辑工具栏。
+    ///
+    /// 放在正文正上方而不是窗口工具栏：它只作用于正文，
+    /// 挂到窗口级会让人以为能改 AI 消息或列表。
+    private var editorToolbar: some View {
+        HStack(spacing: DS.Optical.snug) {
+            toolButton("bold", "加粗") { editorCommand = .bold }
+            toolButton("italic", "斜体") { editorCommand = .italic }
+            toolButton("underline", "下划线") { editorCommand = .underline }
+
+            Divider().frame(height: 14)
+
+            toolButton("textformat.size.larger", "标题 1") { editorCommand = .heading1 }
+            toolButton("textformat.size", "标题 2") { editorCommand = .heading2 }
+            toolButton("textformat", "正文") { editorCommand = .paragraph }
+
+            Divider().frame(height: 14)
+
+            toolButton("list.bullet", "无序列表") { editorCommand = .bulletList }
+            toolButton("list.number", "有序列表") { editorCommand = .orderedList }
+
+            Divider().frame(height: 14)
+
+            toolButton("photo.badge.plus", "插入图片") { editorCommand = .insertImage }
+            toolButton("arrow.triangle.2.circlepath", "替换选中的图片") { editorCommand = .replaceImage }
+            toolButton("trash", "删除选中的图片") { editorCommand = .deleteImage }
+
+            Spacer(minLength: 0)
+
+            toolButton("arrow.uturn.backward", "撤销") { editorCommand = .undo }
+            toolButton("arrow.uturn.forward", "重做") { editorCommand = .redo }
+        }
+        .padding(.horizontal, DS.Space.s)
+        .padding(.vertical, DS.Optical.compact)
+        .background(DS.Palette.surface, in: RoundedRectangle(cornerRadius: DS.Radius.s))
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.Radius.s)
+                .strokeBorder(DS.Palette.stroke, lineWidth: 1)
+        )
+    }
+
+    private func toolButton(_ symbol: String,
+                            _ help: String,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11))
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     /// 从**本地缓存**取正文与图片，并在这里解析一次。

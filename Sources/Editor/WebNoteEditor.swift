@@ -1,6 +1,31 @@
 import SwiftUI
 import WebKit
 import CryptoKit
+import AppKit
+
+/// 正文编辑器能接受的指令。
+///
+/// 用枚举而不是直接传 JS 字符串：调用方（工具栏）不该知道 `execCommand` 怎么拼，
+/// 而且以后换成别的实现时，只需要改执行侧。
+enum NoteEditorCommand: Equatable {
+    case bold
+    case italic
+    case underline
+    case heading1
+    case heading2
+    case heading3
+    case paragraph
+    case bulletList
+    case orderedList
+    case undo
+    case redo
+    /// 选一张本地图片插入到光标处
+    case insertImage
+    /// 把当前选中的图片换成本地另一张
+    case replaceImage
+    /// 删除选中的图片
+    case deleteImage
+}
 
 // 笔记正文的 WebKit 就地编辑器：WKWebView + contenteditable。
 //
@@ -48,6 +73,9 @@ struct WebNoteEditor: NSViewRepresentable {
     /// 超出的正文被关进 WebView 自己的内部滚动区——外层只看到一块 240pt 的盒子，
     /// 下面全是空白。必须让页面把真实高度量出来报上去。
     @Binding var contentHeight: CGFloat
+
+    /// 外部（工具栏）下发的编辑指令。执行后由编辑侧清空，避免重复执行。
+    @Binding var command: NoteEditorCommand?
 
     func makeCoordinator() -> WebNoteEditorCoordinator { WebNoteEditorCoordinator(self) }
 
@@ -113,6 +141,15 @@ struct WebNoteEditor: NSViewRepresentable {
         }
         if context.coordinator.isEditable != isEditable {
             context.coordinator.setEditable(isEditable)
+        }
+
+        // 工具栏指令：执行一次就清空。
+        // 清空要**异步**做——在 updateNSView 里同步改 Binding 会触发
+        // "Modifying state during view update" 警告，严重时死循环。
+        if let command {
+            let pending = command
+            context.coordinator.run(pending)
+            DispatchQueue.main.async { self.command = nil }
         }
     }
 
@@ -220,6 +257,106 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
             "document.body.contentEditable = '\(editable ? "true" : "false")'",
             completionHandler: nil
         )
+    }
+
+    // MARK: 工具栏指令
+
+    /// 执行一条编辑指令。
+    ///
+    /// 格式类走 `execCommand`：WebKit 原生支持加粗/标题/列表，且会自动进入
+    /// 撤销栈（⌘Z 能退回来）。自己操作 DOM 就享受不到这一点。
+    func run(_ command: NoteEditorCommand) {
+        guard let webView else { return }
+
+        switch command {
+        case .insertImage:
+            insertImage(into: webView)
+            return
+
+        case .deleteImage:
+            // 选中图片（或被它包住的文本节点）后删掉整个 `<img>`
+            webView.evaluateJavaScript("""
+            (function(){
+                var sel = window.getSelection();
+                if (!sel || sel.rangeCount === 0) return;
+                var node = sel.anchorNode;
+                while (node && node.nodeName !== 'IMG') { node = node.parentNode; }
+                if (node) node.remove();
+            })();
+            """, completionHandler: nil)
+            return
+
+        case .replaceImage:
+            replaceSelectedImage(into: webView)
+            return
+
+        default:
+            break
+        }
+
+        let js: String
+        switch command {
+        case .bold: js = "document.execCommand('bold')"
+        case .italic: js = "document.execCommand('italic')"
+        case .underline: js = "document.execCommand('underline')"
+        case .heading1: js = "document.execCommand('formatBlock', false, 'h1')"
+        case .heading2: js = "document.execCommand('formatBlock', false, 'h2')"
+        case .heading3: js = "document.execCommand('formatBlock', false, 'h3')"
+        case .paragraph: js = "document.execCommand('formatBlock', false, 'p')"
+        case .bulletList: js = "document.execCommand('insertUnorderedList')"
+        case .orderedList: js = "document.execCommand('insertOrderedList')"
+        case .undo: js = "document.execCommand('undo')"
+        case .redo: js = "document.execCommand('redo')"
+        default: return
+        }
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    /// 选一张本地图片插到光标处。
+    private func insertImage(into webView: WKWebView) {
+        guard let data = pickImageData() else { return }
+        let base64 = data.base64EncodedString()
+        webView.evaluateJavaScript("""
+        (function(){
+            var img = document.createElement('img');
+            img.src = 'data:image/png;base64,\(base64)';
+            img.style.maxWidth = '100%';
+            var sel = window.getSelection();
+            if (sel && sel.rangeCount > 0) {
+                var range = sel.getRangeAt(0);
+                range.deleteContents();
+                range.insertNode(img);
+                range.collapse(false);
+            } else {
+                document.body.appendChild(img);
+            }
+        })();
+        """, completionHandler: nil)
+    }
+
+    /// 把当前选中的图片换成另一张。
+    private func replaceSelectedImage(into webView: WKWebView) {
+        guard let data = pickImageData() else { return }
+        let base64 = data.base64EncodedString()
+        webView.evaluateJavaScript("""
+        (function(){
+            var sel = window.getSelection();
+            if (!sel || sel.rangeCount === 0) return;
+            var node = sel.anchorNode;
+            while (node && node.nodeName !== 'IMG') { node = node.parentNode; }
+            if (!node) return;
+            node.src = 'data:image/png;base64,\(base64)';
+        })();
+        """, completionHandler: nil)
+    }
+
+    private func pickImageData() -> Data? {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .heic, .gif, .webP]
+        panel.allowsMultipleSelection = false
+        panel.message = "选择要插入的图片"
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return try? Data(contentsOf: url)
     }
 
     // MARK: JS 桥
