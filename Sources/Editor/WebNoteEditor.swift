@@ -137,6 +137,13 @@ struct WebNoteEditor: NSViewRepresentable {
         let hash = Self.contentHash(html: html, images: images)
         if context.coordinator.appliedHash != hash {
             context.coordinator.load(html: html, images: images, editable: isEditable)
+            // **重载会清空 WebKit 的撤销栈。**
+            // 此时待执行的命令必须丢弃，不能留到下一轮：
+            // 下一轮会对着一份崭新的、空栈的文档执行 undo，
+            // 结果是静默失败——用户看到的就是"点了撤销没反应"。
+            if command != nil {
+                DispatchQueue.main.async { self.command = nil }
+            }
             return
         }
         if context.coordinator.isEditable != isEditable {
@@ -267,6 +274,12 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
     /// 撤销栈（⌘Z 能退回来）。自己操作 DOM 就享受不到这一点。
     func run(_ command: NoteEditorCommand) {
         guard let webView else { return }
+
+        // **先把焦点要回来。**
+        // 点工具栏按钮时焦点会从 WebView 离开：undo 本身不依赖焦点
+        // （实测无焦点也能撤），但 bold / italic / formatBlock 依赖选区，
+        // 失焦后选区失效，命令会静默返回 false——用户看到"按钮没反应"。
+        webView.window?.makeFirstResponder(webView)
 
         switch command {
         case .insertImage:
@@ -492,6 +505,12 @@ enum WebNoteHTMLBridge {
     body {
         margin: 0;
         padding: 0;
+        /* **可编辑区必须铺满 SwiftUI 给的最小高度。**
+           body 默认高度 = 内容高度：一行字的笔记只有 21pt，
+           而外层把 WebView 撑到 240pt，剩下 219pt 落在 contenteditable 之外，
+           点在那里不出光标、键盘没有落点——表现就是"打不进字"。
+           这里补上同样数值的 min-height，两边严丝合缝。 */
+        min-height: 240px;
         font-family: -apple-system, "PingFang SC", sans-serif;
         font-size: 13px;
         line-height: 1.65;
