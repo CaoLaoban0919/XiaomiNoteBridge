@@ -197,8 +197,25 @@ final class NoteAI: ObservableObject, NoteAIProtocol {
         }
     }
 
-    // MARK: - 提示词
+    /// 清除「被 AI 改过」标记（state 与缓存索引**两份都要清**）。
+    ///
+    /// 用户点「以此为准」时调用：他已经明确表示这份内容由自己定。
+    /// 再挂着这个标记，界面就会一直显示「显示原文」，
+    /// 而那份原文此刻已经和正文一致，没有查看的意义。
+    func clearAIModified(noteId: String) {
+        var state = SyncStateStore.load()
+        state.notes[noteId]?.aiModified = false
+        try? SyncStateStore.save(state)
 
+        let latest = cache.loadIndex()
+        var notes = latest.notes
+        if let index = notes.firstIndex(where: { $0.id == noteId }) {
+            notes[index].aiModified = false
+            try? cache.saveIndex(notes: notes, folders: latest.folders)
+        }
+    }
+
+    // MARK: - 提示词
     /// 系统提示词。**全文写死在代码里**，不放进资源文件——它和下面 `buildMessages`
     /// 里「图片怎么给」的约定是一体的，拆开容易改漏。
     ///

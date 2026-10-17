@@ -909,6 +909,10 @@ struct MainView: View {
                     NoteAIResult(html: html, summary: "恢复原文"),
                     toNoteId: note.id
                 )
+                // **恢复原文 = 回到"没被 AI 改过"的状态。**
+                // 清掉 aiModified 之后，「显示原文」按钮和「AI 已重构」标记都会消失——
+                // 那份原文此刻已经等于正文，继续留着入口只会让人困惑。
+                noteAI.clearAIModified(noteId: note.id)
                 showingOriginal = false
                 loadBody(note)
                 chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
