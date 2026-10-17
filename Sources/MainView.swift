@@ -724,23 +724,23 @@ struct MainView: View {
     /// 放在正文正上方而不是窗口工具栏：它只作用于正文，
     /// 挂到窗口级会让人以为能改 AI 消息或列表。
     private var editorToolbar: some View {
-        HStack(spacing: DS.Optical.snug) {
+        HStack(spacing: DS.Space.xs) {
             toolButton("bold", "加粗") { editorCommand = .bold }
             toolButton("italic", "斜体") { editorCommand = .italic }
             toolButton("underline", "下划线") { editorCommand = .underline }
 
-            Divider().frame(height: 14)
+            Divider().frame(height: 18)
 
             toolButton("textformat.size.larger", "标题 1") { editorCommand = .heading1 }
             toolButton("textformat.size", "标题 2") { editorCommand = .heading2 }
             toolButton("textformat", "正文") { editorCommand = .paragraph }
 
-            Divider().frame(height: 14)
+            Divider().frame(height: 18)
 
             toolButton("list.bullet", "无序列表") { editorCommand = .bulletList }
             toolButton("list.number", "有序列表") { editorCommand = .orderedList }
 
-            Divider().frame(height: 14)
+            Divider().frame(height: 18)
 
             toolButton("photo.badge.plus", "插入图片") { editorCommand = .insertImage }
             toolButton("arrow.triangle.2.circlepath", "替换选中的图片") { editorCommand = .replaceImage }
@@ -751,8 +751,8 @@ struct MainView: View {
             toolButton("arrow.uturn.backward", "撤销") { editorCommand = .undo }
             toolButton("arrow.uturn.forward", "重做") { editorCommand = .redo }
         }
-        .padding(.horizontal, DS.Space.s)
-        .padding(.vertical, DS.Optical.compact)
+        .padding(.horizontal, DS.Space.m)
+        .padding(.vertical, DS.Space.xs)
         .background(DS.Palette.surface, in: RoundedRectangle(cornerRadius: DS.Radius.s))
         .overlay(
             RoundedRectangle(cornerRadius: DS.Radius.s)
@@ -765,8 +765,8 @@ struct MainView: View {
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11))
-                .frame(width: 22, height: 20)
+                .font(.system(size: 14))
+                .frame(width: 30, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
