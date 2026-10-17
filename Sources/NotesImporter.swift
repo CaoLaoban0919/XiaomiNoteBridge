@@ -278,6 +278,36 @@ enum NotesImporter {
         _ = try await runClassified(script, context: "覆盖笔记正文")
     }
 
+    /// ⚠️ **写操作**：往已有笔记里插入图片附件，返回每个附件的 `cid:` 引用。
+    ///
+    /// 走的是 Notes 脚本字典里那个**隐藏的** `contents` 属性。字典原文的注释写着：
+    /// "We do this to facilitate creating an attachment like this:
+    /// `make new attachment with data myFile`" —— 藏起来正是为了支持这种用法。
+    ///
+    /// 返回的 `cid:` 可以直接写进正文 HTML 的 `<img src="cid:...">`，
+    /// 图片才会落在指定位置；不引用的话，附件会挂在笔记末尾。
+    ///
+    /// - Parameter fileURLs: 本地图片文件路径（data URI 必须先落成临时文件）。
+    /// - Returns: 与传入顺序一一对应的 `cid:` 字符串；某个失败则该项为空。
+    static func insertImages(id: String, fileURLs: [URL]) async throws -> [String] {
+        guard !fileURLs.isEmpty else { return [] }
+
+        var cids: [String] = []
+        for url in fileURLs {
+            let script = """
+            tell application "Notes"
+                tell note id "\(escapeForAppleScript(id))"
+                    set a to make new attachment with data POSIX file "\(escapeForAppleScript(url.path))"
+                    return (content identifier of a) as string
+                end tell
+            end tell
+            """
+            let out = try await runClassified(script, context: "插入图片")
+            cids.append(out.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return cids
+    }
+
     /// ⚠️ **写操作**：在「备忘录」中新建一个文件夹，不可撤销（本函数不提供删除）。
     ///
     /// - Parameter name: 文件夹名。

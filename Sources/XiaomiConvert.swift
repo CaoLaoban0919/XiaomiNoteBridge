@@ -252,7 +252,11 @@ enum XiaomiConvert {
                     pending = .order(Int(a["indent"] ?? "1") ?? 1)
                 case "input":
                     flushPending(&out, &pending)
-                    pending = .check(Int(a["indent"] ?? "1") ?? 1, a["checked"] != nil)
+                    // **属性存在不等于已勾选。** 小米写的是 checked="true" / checked="false"，
+                    // 早先只看 `!= nil`，于是所有未完成待办都被渲染成 ☑ —— 待办清单全绿。
+                    let flag = (a["checked"] ?? "").lowercased()
+                    pending = .check(Int(a["indent"] ?? "1") ?? 1,
+                                     flag == "true" || flag == "checked")
 
                 // 正文块
                 case "text":
@@ -462,7 +466,10 @@ enum XiaomiConvert {
                     continue
                 }
                 if name == "input" {
-                    out += (attrMap["checked"] != nil) ? "\u{2611} " : "\u{2610} "
+                    // 同 toHtmlFragment：按 checked 的**值**判定，不看属性存不存在
+                    let flag = (attrMap["checked"] ?? "").lowercased()
+                    let on = flag == "true" || flag == "checked"
+                    out += on ? "\u{2611} " : "\u{2610} "
                     continue
                 }
                 guard safeElements.contains(name) else { continue }

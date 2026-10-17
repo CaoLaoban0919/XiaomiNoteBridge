@@ -72,11 +72,15 @@ final class NoteAI: ObservableObject, NoteAIProtocol {
     /// 模型客户端。只依赖协议，因此可以换成任何 OpenAI 兼容实现，也方便测试时替身。
     private let provider: AIProviderProtocol
 
+    /// 缓存索引。写回时要同步更新它的 `aiModified`，理由见 `applyResult`。
+    private let cache: NoteCacheProtocol
+
     /// 当前是否正在请求模型。界面用它显示进度。
     @Published private(set) var isWorking = false
 
-    init(provider: AIProviderProtocol) {
+    init(provider: AIProviderProtocol, cache: NoteCacheProtocol = NoteCache()) {
         self.provider = provider
+        self.cache = cache
     }
 
     // MARK: - 重构（只产出，不落盘）
@@ -123,12 +127,74 @@ final class NoteAI: ObservableObject, NoteAIProtocol {
             throw NoteAIApplyError.notLinked
         }
 
-        try await NotesImporter.setBody(id: appleId, html: result.html)
+        // **改写前留一份原文**（只留第一次），供详情栏的「显示原文」使用。
+        // 必须在 `setBody` 与缓存覆盖之前做，否则拿到的已经是改写后的版本。
+        if let current = cache.content(for: noteId) {
+            try? cache.saveOriginalIfAbsent(current, for: noteId)
+        }
+
+        // **内嵌图片先落成临时文件。**
+        // 备忘录的正文 HTML 写不进 data URI（实测会变成 base64,(null)），
+        // 但 `make new attachment with data` 可以。所以正文里只留占位文字，
+        // 图片走附件通道单独插入。
+        let (withoutImages, embeddedImages) = Self.splitEmbeddedImages(result.html)
+
+        // **写入前先规范化。**
+        // 备忘录对 HTML 的容忍度远低于浏览器：`script`/`style` 会让整条写失败、
+        // data URI 图片会让 AppleScript 直接报错、flex/grid 布局会让排版整段崩掉。
+        // 在这里过一遍，把"写不进去"的内容提前处理掉，而不是等它抛错再猜原因。
+        let cleaned = NotesHTMLSanitizer.sanitizeWithReport(withoutImages)
+        if !cleaned.fixes.isEmpty {
+            print("[NoteAI] HTML 已规范化：\(cleaned.fixes.joined(separator: "；"))")
+        }
+        try await NotesImporter.setBody(id: appleId, html: cleaned.html)
+
+        // 图片在正文写完之后插入。Notes 会把文件复制进自己的库，
+        // 所以临时文件用完就能删。
+        if !embeddedImages.isEmpty {
+            var urls: [URL] = []
+            for (index, data) in embeddedImages.enumerated() {
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("minb-embed-\(index)-\(UUID().uuidString).png")
+                if (try? data.write(to: url)) != nil { urls.append(url) }
+            }
+            defer { for url in urls { try? FileManager.default.removeItem(at: url) } }
+
+            do {
+                let cids = try await NotesImporter.insertImages(id: appleId, fileURLs: urls)
+                print("[NoteAI] 已插入 \(cids.count) 张图片（正文占位 \(embeddedImages.count) 处）")
+            } catch {
+                // 图片插不进去不该让整次写入失败：文字部分已经落盘了
+                print("[NoteAI] 插入图片失败：\(error.localizedDescription)")
+            }
+        }
 
         // 标记为「被 AI 改过」，同步时会跳过它。
         // 这一步不能省：否则小米侧下次有改动，`set body` 会把用户的重构成果直接冲掉。
         state.notes[noteId]?.aiModified = true
         try SyncStateStore.save(state)
+
+        // **缓存正文也要跟上。** 只改 SyncState 的话，MainView 写回后会
+        // `reloadFromCache()` + `loadBody()`，正文立刻退回重构前的版本——
+        // 用户看到"已写入备忘录"却读着旧内容，会以为写入失败，
+        // 于是再点一次重构，第二次又基于旧正文生成，真正写进去的那版就被盖掉了。
+        // AI 结果按硬约束不含图片，`images` 传空是符合预期的（与 set body 写进去的一致）。
+        // **必须存规范化之后的版本**，不是 `result.html`。
+        // 缓存和备忘录里那份是给用户看的同一份东西；存原文会出现
+        // "界面显示带图/带样式，备忘录里却是被清理过的样子"这种对不上的情况。
+        try? cache.saveContent(CachedNoteContent(html: cleaned.html, images: [:]), for: noteId)
+
+        // **两份账本都要标。**
+        //   - state.json 是「同步时该不该跳过」的依据；
+        //   - 缓存索引是**界面**显示「已被 AI 重构」的依据（MainView 的 noteAIModified）。
+        // 只写前者的话，界面一 reloadFromCache 就把标记冲掉，用户会以为重构白做了，
+        // 甚至会再重构一遍。
+        let latest = cache.loadIndex()
+        var notes = latest.notes
+        if let index = notes.firstIndex(where: { $0.id == noteId }) {
+            notes[index].aiModified = true
+            try? cache.saveIndex(notes: notes, folders: latest.folders)
+        }
     }
 
     // MARK: - 提示词
@@ -377,5 +443,39 @@ final class NoteAI: ObservableObject, NoteAIProtocol {
             out = re.stringByReplacingMatches(in: out, options: [], range: range, withTemplate: "")
         }
         return (out, removed)
+    }
+
+    /// 把 HTML 里的 `data:` 图片抽出来，正文位置留占位文字。
+    ///
+    /// 备忘录的 `set body` 写不进 data URI（实测会变成 `base64,(null)`），
+    /// 但附件的 `make new attachment with data` 可以。两件事必须拆开：
+    /// 正文只留占位，图片单独走附件通道。
+    static func splitEmbeddedImages(_ html: String) -> (html: String, images: [Data]) {
+        guard html.lowercased().contains("data:image") else { return (html, []) }
+
+        let pattern = "<img[^>]*src=\"data:image/[^\"]+;base64,([^\"]+)\"[^>]*>"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return (html, [])
+        }
+
+        let ns = html as NSString
+        let matches = regex.matches(in: html, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return (html, []) }
+
+        // 先按出现顺序收集图片数据
+        var images: [Data] = []
+        for match in matches where match.numberOfRanges > 1 {
+            if let data = Data(base64Encoded: ns.substring(with: match.range(at: 1))) {
+                images.append(data)
+            }
+        }
+
+        // 再从后往前替换：反过来做，前面的替换才不会让后面的 range 失效
+        let mutable = NSMutableString(string: html)
+        for match in matches.reversed() {
+            mutable.replaceCharacters(in: match.range, with: "<p>[图片已转存为附件]</p>")
+        }
+
+        return (mutable as String, images)
     }
 }

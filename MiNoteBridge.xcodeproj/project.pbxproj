@@ -1,0 +1,469 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		00F4E6E6880D9D7772B4BAB7 /* AIContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6C47D91FA3881960AAD6BC0 /* AIContract.swift */; };
+		146044432305DAFAF2C3FFEF /* NotesImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E33F29DCACD1A0FF97E72956 /* NotesImporter.swift */; };
+		1B76714F6993E395D0C7CE46 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4672EBE2F6E5B14B75ED7B3 /* App.swift */; };
+		1CC7F5084F520B93425205B6 /* NoteRichEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DA3F1D5FAC7D6565EE36A42 /* NoteRichEditor.swift */; };
+		1E8240516C7759286BBB4300 /* AIChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BED8DFA0C79C765E5DDC4CFE /* AIChatModels.swift */; };
+		2429D2F769853AC081A8A302 /* MiLoginService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E9D626AF601A05AAD3C83CF /* MiLoginService.swift */; };
+		27A2318BED1390A149A83A8D /* LayoutProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F011C72FEBAFD6EC3B7B48D /* LayoutProbe.swift */; };
+		27D43438310B43B752EAC0CC /* SyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56FF49146C2DC912A4B6EAC6 /* SyncState.swift */; };
+		2BA0B0A3FF004171FDE22A28 /* ImportEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BB9690CFCB7A31CED205C2E /* ImportEngine.swift */; };
+		3543C6CEB1BC3DC5A4B4763E /* WebNoteEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B08026C0B546C24541C83242 /* WebNoteEditor.swift */; };
+		4554A66F8BD90AEDB4FF6C4F /* WebFallback.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA33B40C5CB82A901520CA95 /* WebFallback.swift */; };
+		4BFA695DB5EC20EE382BA38F /* MarkdownLite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 064DC5A264CBA44CF46FDB4E /* MarkdownLite.swift */; };
+		547A77DB7E2B07F043B9D188 /* AIChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABF64B9CF3EB44E2A1F27CEB /* AIChatView.swift */; };
+		56E0755B3E0D49208EC7C211 /* NoteAI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CC4B63F713320CFAE52C14E /* NoteAI.swift */; };
+		722870EA33ABF18703A74FFF /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EAF38161E2812DD9545A210 /* OnboardingView.swift */; };
+		789AB8F7ADE22412352BFEA2 /* NotesHTMLSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8376A247CE0646DC1CFEE1 /* NotesHTMLSanitizer.swift */; };
+		83E6845620B73FB5F9EF111D /* AttachmentReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0E299143E0B97CE27406802 /* AttachmentReader.swift */; };
+		879DA0DA957FDEFD5873E378 /* XiaomiConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19F482CB5BE72F1A47684D90 /* XiaomiConvert.swift */; };
+		9470C57F76FA868A9A6BBA8A /* NoteContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06F6D64CB702739425EDF29A /* NoteContent.swift */; };
+		9F46887E45FEBE6DD2B834FE /* MiAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6609BF673A23F207B89B091C /* MiAPI.swift */; };
+		A5780F6A8627667012FD3333 /* PermissionStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDFE3CCDA25E53A100A4F3B /* PermissionStepView.swift */; };
+		ABEAC0303E4A14C8670CD517 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2D793305A5EE8E52AEAD12E /* MainView.swift */; };
+		AC26A17256C14DCDDF867AE2 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2231420BA42B0E0D41E23A20 /* DesignSystem.swift */; };
+		B864786BF2A87B29EABA8740 /* OnboardingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D75F29332610DABD7928F366 /* OnboardingState.swift */; };
+		BA34B6B149CF9A2A8D1ACF85 /* LicenseStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECC318D1532139AC02C021B6 /* LicenseStepView.swift */; };
+		C184CE965FD982F3DC7F1CBF /* EnexWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD57F942EA6288D17E95AD57 /* EnexWriter.swift */; };
+		C449C0C406D34594EE30FFEC /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F3ACCBC0B8A3631B6ED015 /* Models.swift */; };
+		C85518960D380603DB0FDA6D /* StoreContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECB5C55094C81E93FCC35464 /* StoreContract.swift */; };
+		D853EA985A1851E43D132BF4 /* CredentialsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C1F29A2A91CA17A11D25419 /* CredentialsStore.swift */; };
+		DAA487202F44B0120194E9FE /* AISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69A2A8E27B82FC72B6508590 /* AISettingsView.swift */; };
+		E59C6DC472C564B5FB103306 /* LoginTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23D22D04B5E5977B609E7436 /* LoginTrace.swift */; };
+		E5A836AEF75E1A94A72CD512 /* NotesBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBC0019EEB42DC920CCF7A2B /* NotesBridge.swift */; };
+		EE497DDEC026DCEE73555B46 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF459D938779B76A72DC1AB2 /* AIProvider.swift */; };
+		EEE616F402711869EC9EC59D /* LoginStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85932A164C9D694F2A8A202D /* LoginStepView.swift */; };
+		F3C924177389E692A4317F3F /* NoteRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5064716997676DC1586B9F38 /* NoteRenderer.swift */; };
+		F47D0F0AF5F5E69C3070FD01 /* NoteCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF1946B0EA86D21BEF2D8989 /* NoteCache.swift */; };
+		F737EBE4076058A22DBD1688 /* PullEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65BC1BDBF805DF1809842F8D /* PullEngine.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		064DC5A264CBA44CF46FDB4E /* MarkdownLite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownLite.swift; sourceTree = "<group>"; };
+		06F6D64CB702739425EDF29A /* NoteContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteContent.swift; sourceTree = "<group>"; };
+		19F482CB5BE72F1A47684D90 /* XiaomiConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XiaomiConvert.swift; sourceTree = "<group>"; };
+		1E9D626AF601A05AAD3C83CF /* MiLoginService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiLoginService.swift; sourceTree = "<group>"; };
+		2231420BA42B0E0D41E23A20 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		23D22D04B5E5977B609E7436 /* LoginTrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginTrace.swift; sourceTree = "<group>"; };
+		31F3ACCBC0B8A3631B6ED015 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		3EAF38161E2812DD9545A210 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		4C1F29A2A91CA17A11D25419 /* CredentialsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialsStore.swift; sourceTree = "<group>"; };
+		5064716997676DC1586B9F38 /* NoteRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteRenderer.swift; sourceTree = "<group>"; };
+		56FF49146C2DC912A4B6EAC6 /* SyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncState.swift; sourceTree = "<group>"; };
+		5DA3F1D5FAC7D6565EE36A42 /* NoteRichEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteRichEditor.swift; sourceTree = "<group>"; };
+		5F011C72FEBAFD6EC3B7B48D /* LayoutProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutProbe.swift; sourceTree = "<group>"; };
+		65BC1BDBF805DF1809842F8D /* PullEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PullEngine.swift; sourceTree = "<group>"; };
+		6609BF673A23F207B89B091C /* MiAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiAPI.swift; sourceTree = "<group>"; };
+		69A2A8E27B82FC72B6508590 /* AISettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsView.swift; sourceTree = "<group>"; };
+		6CC4B63F713320CFAE52C14E /* NoteAI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteAI.swift; sourceTree = "<group>"; };
+		7D5E1A3F7FC40355D4E9888A /* MiNoteBridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MiNoteBridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		85932A164C9D694F2A8A202D /* LoginStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginStepView.swift; sourceTree = "<group>"; };
+		8BB9690CFCB7A31CED205C2E /* ImportEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportEngine.swift; sourceTree = "<group>"; };
+		9B8376A247CE0646DC1CFEE1 /* NotesHTMLSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesHTMLSanitizer.swift; sourceTree = "<group>"; };
+		9BDFE3CCDA25E53A100A4F3B /* PermissionStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionStepView.swift; sourceTree = "<group>"; };
+		ABF64B9CF3EB44E2A1F27CEB /* AIChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatView.swift; sourceTree = "<group>"; };
+		B08026C0B546C24541C83242 /* WebNoteEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebNoteEditor.swift; sourceTree = "<group>"; };
+		B0E299143E0B97CE27406802 /* AttachmentReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentReader.swift; sourceTree = "<group>"; };
+		BA33B40C5CB82A901520CA95 /* WebFallback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebFallback.swift; sourceTree = "<group>"; };
+		BED8DFA0C79C765E5DDC4CFE /* AIChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatModels.swift; sourceTree = "<group>"; };
+		BF459D938779B76A72DC1AB2 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
+		C2D793305A5EE8E52AEAD12E /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		C6C47D91FA3881960AAD6BC0 /* AIContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIContract.swift; sourceTree = "<group>"; };
+		CBC0019EEB42DC920CCF7A2B /* NotesBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesBridge.swift; sourceTree = "<group>"; };
+		D75F29332610DABD7928F366 /* OnboardingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingState.swift; sourceTree = "<group>"; };
+		DF1946B0EA86D21BEF2D8989 /* NoteCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteCache.swift; sourceTree = "<group>"; };
+		E33F29DCACD1A0FF97E72956 /* NotesImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesImporter.swift; sourceTree = "<group>"; };
+		E4672EBE2F6E5B14B75ED7B3 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		ECB5C55094C81E93FCC35464 /* StoreContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreContract.swift; sourceTree = "<group>"; };
+		ECC318D1532139AC02C021B6 /* LicenseStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicenseStepView.swift; sourceTree = "<group>"; };
+		FD57F942EA6288D17E95AD57 /* EnexWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnexWriter.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		150F292EE6AFD628E5381331 /* Editor */ = {
+			isa = PBXGroup;
+			children = (
+				5DA3F1D5FAC7D6565EE36A42 /* NoteRichEditor.swift */,
+				B08026C0B546C24541C83242 /* WebNoteEditor.swift */,
+			);
+			path = Editor;
+			sourceTree = "<group>";
+		};
+		166313AD6B18079A4E2C9146 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7D5E1A3F7FC40355D4E9888A /* MiNoteBridge.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		186A3B0C499A24308DD319A1 /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				BED8DFA0C79C765E5DDC4CFE /* AIChatModels.swift */,
+				ABF64B9CF3EB44E2A1F27CEB /* AIChatView.swift */,
+				C6C47D91FA3881960AAD6BC0 /* AIContract.swift */,
+				BF459D938779B76A72DC1AB2 /* AIProvider.swift */,
+				69A2A8E27B82FC72B6508590 /* AISettingsView.swift */,
+				B0E299143E0B97CE27406802 /* AttachmentReader.swift */,
+				6CC4B63F713320CFAE52C14E /* NoteAI.swift */,
+				9B8376A247CE0646DC1CFEE1 /* NotesHTMLSanitizer.swift */,
+			);
+			path = AI;
+			sourceTree = "<group>";
+		};
+		2526C438338A6DA7380E30BC /* Store */ = {
+			isa = PBXGroup;
+			children = (
+				8BB9690CFCB7A31CED205C2E /* ImportEngine.swift */,
+				DF1946B0EA86D21BEF2D8989 /* NoteCache.swift */,
+				65BC1BDBF805DF1809842F8D /* PullEngine.swift */,
+				ECB5C55094C81E93FCC35464 /* StoreContract.swift */,
+			);
+			path = Store;
+			sourceTree = "<group>";
+		};
+		57596117DEC195E85F702B32 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				ECC318D1532139AC02C021B6 /* LicenseStepView.swift */,
+				85932A164C9D694F2A8A202D /* LoginStepView.swift */,
+				064DC5A264CBA44CF46FDB4E /* MarkdownLite.swift */,
+				D75F29332610DABD7928F366 /* OnboardingState.swift */,
+				3EAF38161E2812DD9545A210 /* OnboardingView.swift */,
+				9BDFE3CCDA25E53A100A4F3B /* PermissionStepView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		9B8A92546FF5DF0B3708F4CB /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				E4672EBE2F6E5B14B75ED7B3 /* App.swift */,
+				4C1F29A2A91CA17A11D25419 /* CredentialsStore.swift */,
+				2231420BA42B0E0D41E23A20 /* DesignSystem.swift */,
+				FD57F942EA6288D17E95AD57 /* EnexWriter.swift */,
+				5F011C72FEBAFD6EC3B7B48D /* LayoutProbe.swift */,
+				23D22D04B5E5977B609E7436 /* LoginTrace.swift */,
+				C2D793305A5EE8E52AEAD12E /* MainView.swift */,
+				6609BF673A23F207B89B091C /* MiAPI.swift */,
+				1E9D626AF601A05AAD3C83CF /* MiLoginService.swift */,
+				31F3ACCBC0B8A3631B6ED015 /* Models.swift */,
+				06F6D64CB702739425EDF29A /* NoteContent.swift */,
+				5064716997676DC1586B9F38 /* NoteRenderer.swift */,
+				CBC0019EEB42DC920CCF7A2B /* NotesBridge.swift */,
+				E33F29DCACD1A0FF97E72956 /* NotesImporter.swift */,
+				56FF49146C2DC912A4B6EAC6 /* SyncState.swift */,
+				BA33B40C5CB82A901520CA95 /* WebFallback.swift */,
+				19F482CB5BE72F1A47684D90 /* XiaomiConvert.swift */,
+				186A3B0C499A24308DD319A1 /* AI */,
+				150F292EE6AFD628E5381331 /* Editor */,
+				57596117DEC195E85F702B32 /* Onboarding */,
+				2526C438338A6DA7380E30BC /* Store */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		B46D244F71387ADD6CCD2404 = {
+			isa = PBXGroup;
+			children = (
+				9B8A92546FF5DF0B3708F4CB /* Sources */,
+				166313AD6B18079A4E2C9146 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		212A96D358EEFFE5682E5F12 /* MiNoteBridge */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 28D35E0D08EA8994C79DEEA7 /* Build configuration list for PBXNativeTarget "MiNoteBridge" */;
+			buildPhases = (
+				1D25214ABF763E084122B8B8 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MiNoteBridge;
+			packageProductDependencies = (
+			);
+			productName = MiNoteBridge;
+			productReference = 7D5E1A3F7FC40355D4E9888A /* MiNoteBridge.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4378424AB6819D4DB80C29DA /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					212A96D358EEFFE5682E5F12 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 463FC8C2A1D4E1BA29DC0204 /* Build configuration list for PBXProject "MiNoteBridge" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B46D244F71387ADD6CCD2404;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 166313AD6B18079A4E2C9146 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				212A96D358EEFFE5682E5F12 /* MiNoteBridge */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1D25214ABF763E084122B8B8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1E8240516C7759286BBB4300 /* AIChatModels.swift in Sources */,
+				547A77DB7E2B07F043B9D188 /* AIChatView.swift in Sources */,
+				00F4E6E6880D9D7772B4BAB7 /* AIContract.swift in Sources */,
+				EE497DDEC026DCEE73555B46 /* AIProvider.swift in Sources */,
+				DAA487202F44B0120194E9FE /* AISettingsView.swift in Sources */,
+				1B76714F6993E395D0C7CE46 /* App.swift in Sources */,
+				83E6845620B73FB5F9EF111D /* AttachmentReader.swift in Sources */,
+				D853EA985A1851E43D132BF4 /* CredentialsStore.swift in Sources */,
+				AC26A17256C14DCDDF867AE2 /* DesignSystem.swift in Sources */,
+				C184CE965FD982F3DC7F1CBF /* EnexWriter.swift in Sources */,
+				2BA0B0A3FF004171FDE22A28 /* ImportEngine.swift in Sources */,
+				27A2318BED1390A149A83A8D /* LayoutProbe.swift in Sources */,
+				BA34B6B149CF9A2A8D1ACF85 /* LicenseStepView.swift in Sources */,
+				EEE616F402711869EC9EC59D /* LoginStepView.swift in Sources */,
+				E59C6DC472C564B5FB103306 /* LoginTrace.swift in Sources */,
+				ABEAC0303E4A14C8670CD517 /* MainView.swift in Sources */,
+				4BFA695DB5EC20EE382BA38F /* MarkdownLite.swift in Sources */,
+				9F46887E45FEBE6DD2B834FE /* MiAPI.swift in Sources */,
+				2429D2F769853AC081A8A302 /* MiLoginService.swift in Sources */,
+				C449C0C406D34594EE30FFEC /* Models.swift in Sources */,
+				56E0755B3E0D49208EC7C211 /* NoteAI.swift in Sources */,
+				F47D0F0AF5F5E69C3070FD01 /* NoteCache.swift in Sources */,
+				9470C57F76FA868A9A6BBA8A /* NoteContent.swift in Sources */,
+				F3C924177389E692A4317F3F /* NoteRenderer.swift in Sources */,
+				1CC7F5084F520B93425205B6 /* NoteRichEditor.swift in Sources */,
+				E5A836AEF75E1A94A72CD512 /* NotesBridge.swift in Sources */,
+				789AB8F7ADE22412352BFEA2 /* NotesHTMLSanitizer.swift in Sources */,
+				146044432305DAFAF2C3FFEF /* NotesImporter.swift in Sources */,
+				B864786BF2A87B29EABA8740 /* OnboardingState.swift in Sources */,
+				722870EA33ABF18703A74FFF /* OnboardingView.swift in Sources */,
+				A5780F6A8627667012FD3333 /* PermissionStepView.swift in Sources */,
+				F737EBE4076058A22DBD1688 /* PullEngine.swift in Sources */,
+				C85518960D380603DB0FDA6D /* StoreContract.swift in Sources */,
+				27D43438310B43B752EAC0CC /* SyncState.swift in Sources */,
+				4554A66F8BD90AEDB4FF6C4F /* WebFallback.swift in Sources */,
+				3543C6CEB1BC3DC5A4B4763E /* WebNoteEditor.swift in Sources */,
+				879DA0DA957FDEFD5873E378 /* XiaomiConvert.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1B985D3D9AD719C987D0A670 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				INFOPLIST_FILE = Generated/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.minotebridge.app;
+				PRODUCT_NAME = MiNoteBridge;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		34E7475B426B6174B4D2136F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7C438D000495052D125FF0F4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		E26D47D1C521FEA0D41CA921 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				INFOPLIST_FILE = Generated/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.minotebridge.app;
+				PRODUCT_NAME = MiNoteBridge;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		28D35E0D08EA8994C79DEEA7 /* Build configuration list for PBXNativeTarget "MiNoteBridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1B985D3D9AD719C987D0A670 /* Debug */,
+				E26D47D1C521FEA0D41CA921 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		463FC8C2A1D4E1BA29DC0204 /* Build configuration list for PBXProject "MiNoteBridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				34E7475B426B6174B4D2136F /* Debug */,
+				7C438D000495052D125FF0F4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 4378424AB6819D4DB80C29DA /* Project object */;
+}

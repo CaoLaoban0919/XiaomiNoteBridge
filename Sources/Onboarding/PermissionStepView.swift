@@ -209,11 +209,17 @@ struct PermissionStepView: View {
         phase = .checking
         // 给界面一帧时间先把「正在检测」画出来，避免闪一下空白
         try? await Task.sleep(nanoseconds: 250_000_000)
-        guard await NotesBridge.ensureNotesRunning() else {
+        // **不要在这里拉起「备忘录」。**
+        // 用户只是走到这一步、还没点「授权」，不该看到 Dock 里突然多出一个备忘录
+        // （甚至把它的首次启动向导弹出来）。这里只做状态查询：
+        // 没运行就如实标成「未运行」，等用户真的点「授权」时再由 `request()`
+        // 拉起——那时是他明确要求的结果。
+        let status = NotesBridge.automationStatus(askUser: false)
+        if status == .targetNotRunning {
             phase = .systemAppMissing
             return
         }
-        phase = classify(NotesBridge.automationStatus(askUser: false), asked: false)
+        phase = classify(status, asked: false)
     }
 
     /// 把系统返回码翻成界面状态。

@@ -47,6 +47,25 @@ struct CachedFolder: Identifiable, Codable, Equatable {
 }
 
 /// 一条笔记的完整内容
+extension CachedNote {
+    /// 纯文本摘要，供列表与详情显示。
+    ///
+    /// `snippet` 存的是小米返回的**原始片段**，可能带 `<new-format>` / `<text indent>`
+    /// 这类标签。列表直接显示它，于是满屏尖括号。
+    /// 这里只在**显示前**剥标签、解实体，不改存储值——原始片段留着日后解析用。
+    var plainSnippet: String {
+        var s = snippet
+        s = s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "&nbsp;", with: " ")
+        s = s.replacingOccurrences(of: "&amp;", with: "&")
+        s = s.replacingOccurrences(of: "&lt;", with: "<")
+        s = s.replacingOccurrences(of: "&gt;", with: ">")
+        s = s.replacingOccurrences(of: "&quot;", with: "\"")
+        s = s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 struct CachedNoteContent {
     var html: String
     /// fileId -> 图片字节
@@ -106,6 +125,12 @@ protocol NoteCacheProtocol: AnyObject {
     /// 取一条笔记的正文与图片；没拉到时返回 nil
     func content(for noteId: String) -> CachedNoteContent?
     func saveContent(_ content: CachedNoteContent, for noteId: String) throws
+
+    /// 保存「AI 改写前的原文」，**只在没有备份时才写**。
+    /// 每次改写都覆盖的话，"原文"会跟着往后漂，用户看到的就是上一次 AI 的版本了。
+    func saveOriginalIfAbsent(_ content: CachedNoteContent, for noteId: String) throws
+    /// 读取 AI 改写前的原文。没有备份时返回 nil。
+    func originalContent(for noteId: String) -> String?
 
     /// 单独取一张图（列表缩略图之类会用到）
     func imageData(fileId: String) -> Data?

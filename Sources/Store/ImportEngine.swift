@@ -37,6 +37,13 @@ final class ImportEngine: ObservableObject, ImportEngineProtocol {
     @Published private(set) var logLines: [String] = []
     @Published private(set) var isRunning = false
 
+    /// 最近一次导入里**真正写成功**的笔记 id。
+    ///
+    /// 界面用它决定"哪些勾选可以清掉"：失败的、跳过的、被拦下的一律保留，
+    /// 用户回头才能直接重试。不能用 `imported` 标记判断——
+    /// 覆盖型笔记本来 `imported == true`，失败了也还是 true，从标记上看不出区别。
+    @Published private(set) var lastAppliedNoteIds: Set<String> = []
+
     // MARK: - 内部状态
 
     /// 本地笔记缓存。读正文与图片；导入结果（`imported` / `appleId`）写回它的索引。
@@ -160,6 +167,9 @@ final class ImportEngine: ObservableObject, ImportEngineProtocol {
 
     private func runImport(noteIds: [String], approvedOverwrites: Set<String>) async throws {
         recoverPendingBatchIfNeeded()
+
+        // 每轮重算：上一轮写成功的 id 不该留到这一轮
+        lastAppliedNoteIds = []
 
         // 1. 从缓存里取选中的笔记并分类。**不联网。**
         let index = cache.loadIndex()
@@ -405,6 +415,9 @@ final class ImportEngine: ObservableObject, ImportEngineProtocol {
                                                                          contentHTML: task.content.html))
                 done += 1
                 recordOverwrite(task)
+                // 只有真正写完的才记进来：界面据此清勾选，
+                // 失败的那条必须留在勾选里让用户重试
+                lastAppliedNoteIds.insert(task.note.id)
                 log("已覆盖「\(task.note.title)」的正文。")
             } catch {
                 failed += 1

@@ -79,6 +79,10 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
     /// 请求超时。60 秒：本机模型冷启动也够，云端慢到 60 秒以上就该报错而不是干等。
     static let requestTimeout: TimeInterval = 60
 
+    /// 取模型列表的超时。比聊天短得多——它只返回一串名字，
+    /// 超过 20 秒还没响应，基本可断定地址填错或网络不通，没必要让用户干等。
+    static let modelListTimeout: TimeInterval = 20
+
     @Published private(set) var config: AIConfig
 
     /// 最近一次写盘失败的原因。**只含系统给的错误描述，不含 API Key。**
@@ -123,7 +127,16 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
 
     // MARK: 请求地址归一化
 
-    /// 把用户填的 baseURL 拼成**真正要请求的** `/chat/completions` 地址。
+    /// 同一台服务上需要拼的两种资源。
+    ///
+    /// 放在一起归一化是有原因的：聊天地址和模型列表地址**必须落在同一个前缀上**，
+    /// 否则界面显示的是"连 A 服务"，实际取模型却去了 B 服务，出问题极难排查。
+    enum AIResource: String, CaseIterable {
+        case chatCompletions = "chat/completions"
+        case models = "models"
+    }
+
+    /// 把用户填的 baseURL 拼成**真正要请求的**资源地址。
     ///
     /// 用户会填出各种形态：带不带尾斜杠、带不带 `/v1`、甚至直接把完整接口地址抄进来。
     /// 与其要求用户填对，不如统一在这里归一化，并在设置界面把结果**显示出来**让他核对。
@@ -133,10 +146,13 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
     /// 2. 没有 `://` 时补协议：本机（`localhost` / `127.0.0.1` / `0.0.0.0` / `::1`）补 `http://`，
     ///    其余补 `https://`。
     /// 3. 路径去尾斜杠。
-    /// 4. 路径已经以 `/chat/completions` 结尾 → 原样用（用户填的是完整接口，别重复追加）。
-    /// 5. 路径最后一段是 `v<数字>`（`/v1`、`/openai/v2`）→ 追加 `/chat/completions`。
-    /// 6. 其余（只有主机名，或 `/openai` 这种没有版本段的前缀）→ 追加 `/v1/chat/completions`。
-    static func endpointURL(for baseURL: String) throws -> URL {
+    /// 4. 路径若以**任意一种**已知资源结尾（用户粘的是完整接口地址）→ 先退回服务前缀。
+    ///    少了这步，从 `.../chat/completions` 切到 `/models` 会拼出
+    ///    `.../chat/completions/v1/models` 这种不存在的地址。
+    /// 5. 路径最后一段是 `v<数字>`（`/v1`、`/openai/v2`）→ 追加 `/<资源>`。
+    /// 6. 其余（只有主机名，或 `/openai` 这种没有版本段的前缀）→ 追加 `/v1/<资源>`。
+    static func endpointURL(for baseURL: String,
+                            resource: AIResource = .chatCompletions) throws -> URL {
         let raw = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { throw AIError.badURL(baseURL) }
 
@@ -160,12 +176,23 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         var path = components.percentEncodedPath
         while path.hasSuffix("/") { path.removeLast() }
 
-        let lowercasedPath = path.lowercased()
-        if !lowercasedPath.hasSuffix("/chat/completions") {
-            let lastSegment = lowercasedPath.split(separator: "/").last.map(String.init) ?? ""
-            let isVersionSegment = lastSegment.range(of: "^v[0-9]+$", options: .regularExpression) != nil
-            path += isVersionSegment ? "/chat/completions" : "/v1/chat/completions"
+        // 用户可能直接粘了某个完整接口地址：先退回服务前缀，再按目标资源重新拼。
+        // 少这一步，从 `.../chat/completions` 切到 `/models` 会拼出 `.../chat/completions/v1/models`。
+        var lowercasedPath = path.lowercased()
+        for known in AIResource.allCases {
+            let marker = "/" + known.rawValue
+            if lowercasedPath.hasSuffix(marker) {
+                path.removeLast(marker.count)
+                while path.hasSuffix("/") { path.removeLast() }
+                lowercasedPath = path.lowercased()
+                break
+            }
         }
+
+        let suffix = "/" + resource.rawValue
+        let lastSegment = lowercasedPath.split(separator: "/").last.map(String.init) ?? ""
+        let isVersionSegment = lastSegment.range(of: "^v[0-9]+$", options: .regularExpression) != nil
+        path += isVersionSegment ? suffix : "/v1" + suffix
 
         var resolved = components
         resolved.percentEncodedPath = path
@@ -241,6 +268,66 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         return "\(completion.model) 响应正常，耗时 \(milliseconds) ms。"
     }
 
+    // MARK: 模型列表
+
+    /// 拉取服务端可用模型列表。
+    ///
+    /// **只要求 `baseURL` 与 `apiKey`**，不检查 `isUsable`——那个属性还要求已选好模型，
+    /// 而设置界面恰恰是在「还没选模型」的时候来取列表的，用 `isUsable` 会把入口死锁。
+    func fetchModels() async throws -> [String] {
+        let config = self.config
+        let base = config.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { throw AIError.badURL(config.baseURL) }
+        guard !key.isEmpty else { throw AIError.missingAPIKey }
+
+        let url = try AIProvider.endpointURL(for: base, resource: .models)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = AIProvider.modelListTimeout
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw AIError.network(error.localizedDescription)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw AIError.network("服务返回的不是 HTTP 响应。")
+        }
+        // 404 / 405 是「这家没这个接口」的典型信号，单独给一条能指导下一步的提示。
+        if http.statusCode == 404 || http.statusCode == 405 {
+            throw AIError.modelListUnsupported
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw AIError.http(http.statusCode, AIProvider.preview(of: data))
+        }
+
+        let decoded: ModelListResponse
+        do {
+            decoded = try JSONDecoder().decode(ModelListResponse.self, from: data)
+        } catch {
+            throw AIError.network("无法解析模型列表：\(AIProvider.preview(of: data))")
+        }
+
+        // 去重 + 去掉空白项：有的服务会把同一个模型名重复列好几遍。
+        var seen = Set<String>()
+        let ids = (decoded.data ?? []).compactMap { entry -> String? in
+            guard let raw = entry.id else { return nil }
+            let id = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, seen.insert(id).inserted else { return nil }
+            return id
+        }
+        guard !ids.isEmpty else { throw AIError.modelListEmpty }
+
+        return ids.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     /// 响应体的可读预览：压平换行 + 截断。错误信息里绝不能带上请求头（含 API Key）。
     private static func preview(of data: Data, limit: Int = 300) -> String {
         guard let raw = String(data: data, encoding: .utf8) else {
@@ -276,6 +363,9 @@ private struct WireMessage: Encodable {
             content = .plain(text)
         case .user(let text):
             role = "user"
+            content = .plain(text)
+        case .assistant(let text):
+            role = "assistant"
             content = .plain(text)
         case .userWithImages(let text, let images):
             role = "user"
@@ -368,268 +458,14 @@ private enum FlexibleContent: Decodable {
     }
 }
 
-// MARK: - 设置界面
-
-/// AI 设置弹窗。无参构造（`AISettingsSheet()`）即可，由 `SettingsSheet` 引用。
-///
-/// 这个界面存在的意义只有一条：**让用户能自己核对发出去的到底是什么。**
-/// 所以除了几个输入框，必须显示出归一化之后的最终请求地址——配置错了，一眼就能看出来。
-struct AISettingsSheet: View {
-
-    @Environment(\.dismiss) private var dismiss
-
-    /// 默认用共享实例；显式传入时便于测试。
-    @ObservedObject private var provider: AIProvider
-
-    @State private var draft: AIConfig
-    @State private var test: TestState = .idle
-    @State private var confirmingClear = false
-    @State private var pendingSave: Task<Void, Never>?
-
-    init(provider: AIProvider = .shared) {
-        self.provider = provider
-        _draft = State(initialValue: provider.config)
+/// `GET /models` 的响应。只取 `data[].id`——
+/// 其余字段（`object` / `created` / `owned_by`）各家给得都不一样，一概不关心。
+/// `id` 声明为可选：个别服务（例如某些本地推理框架）会返回缺字段的条目，
+/// 整体解码不能因此失败，跳过那一条就好。
+private struct ModelListResponse: Decodable {
+    struct Entry: Decodable {
+        let id: String?
     }
-
-    private enum TestState {
-        case idle
-        case running
-        case ok(String)
-        case failed(String)
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("AI 服务").font(DS.Fonts.screenTitle)
-                Spacer()
-                Button("完成") {
-                    // 收尾：把最后一次改动落盘，别让用户输完立刻关窗就丢了。
-                    pendingSave?.cancel()
-                    provider.update(draft)
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding(.horizontal, DS.Space.xl)
-            .padding(.vertical, DS.Space.l)
-
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: DS.Space.l) {
-                    statusBar
-                    enableCard
-                    serviceCard
-                    modelCard
-                    testCard
-                }
-                .padding(DS.Space.xl)
-            }
-
-            Divider()
-
-            DSFooter(note: "配置保存在 \(AIConfigStore.fileURL.path)，文件权限 0600。") {
-                Button("清除配置", role: .destructive) { confirmingClear = true }
-                    .controlSize(.small)
-                    .disabled(draft == .empty)
-            }
-        }
-        .frame(width: DS.windowSize.width, height: DS.windowSize.height)
-        .confirmationDialog("清除 AI 配置？", isPresented: $confirmingClear) {
-            Button("清除", role: .destructive) {
-                draft = .empty   // 触发下面的 onChange → update(.empty) → 删掉配置文件
-                test = .idle
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("将删除本机保存的服务地址、API Key 与模型名。")
-        }
-        .onChange(of: draft) { _, newValue in
-            // 不在每次按键就写盘，停手之后再落盘；同时「未保存」这个状态才是真的。
-            // 关窗不取消它：弹窗关了，最后那次改动照样要落地。
-            pendingSave?.cancel()
-            pendingSave = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: AISettingsSheet.saveDelayNanoseconds)
-                guard !Task.isCancelled else { return }
-                provider.update(newValue)
-            }
-        }
-    }
-
-    private static let saveDelayNanoseconds: UInt64 = 400_000_000
-
-    // MARK: 状态条
-
-    @ViewBuilder
-    private var statusBar: some View {
-        if let error = provider.lastSaveError {
-            DSStatusBar(icon: "exclamationmark.triangle.fill", tint: DS.Status.bad,
-                        title: "配置写入失败", detail: error)
-        } else if draft == .empty {
-            DSStatusBar(icon: "circle.dashed", tint: DS.Status.idle,
-                        title: "尚未配置 AI 服务",
-                        detail: "填入服务地址、API Key 与模型名即可开始使用。")
-        } else if isDirty {
-            DSStatusBar(icon: "pencil.circle.fill", tint: DS.Status.warn,
-                        title: "有未保存的更改",
-                        detail: "停止输入后会自动写入本地配置文件。")
-        } else if draft.enabled && !draft.isUsable {
-            DSStatusBar(icon: "exclamationmark.triangle.fill", tint: DS.Status.warn,
-                        title: "已启用，但配置不完整",
-                        detail: "服务地址、API Key、文本模型三项都填好才能真正发请求。")
-        } else if draft.enabled {
-            DSStatusBar(icon: "checkmark.circle.fill", tint: DS.Status.ok,
-                        title: "已启用并保存", detail: savedDetail)
-        } else {
-            DSStatusBar(icon: "pause.circle.fill", tint: DS.Status.idle,
-                        title: "已保存，但 AI 功能处于关闭状态", detail: savedDetail)
-        }
-    }
-
-    private var savedDetail: String {
-        guard let permission = AIConfigStore.filePermission() else { return "尚未写入磁盘。" }
-        return "本地文件权限 \(permission)。"
-    }
-
-    private var isDirty: Bool { draft != provider.config }
-
-    // MARK: 卡片
-
-    private var enableCard: some View {
-        DSCard(title: "启用", icon: "switch.2") {
-            Toggle("启用 AI 功能", isOn: $draft.enabled)
-                .toggleStyle(.switch)
-                .font(DS.Fonts.label)
-            Text("关闭后完全不联网，也不显示 AI 相关入口。")
-                .font(DS.Fonts.caption)
-                .foregroundStyle(.tertiary)
-        }
-    }
-
-    private var serviceCard: some View {
-        DSCard(title: "服务", icon: "network") {
-            VStack(alignment: .leading, spacing: DS.Space.s) {
-                labeledField("服务地址") {
-                    TextField("https://api.deepseek.com 或 http://localhost:11434/v1",
-                              text: $draft.baseURL)
-                }
-                labeledField("API Key") {
-                    SecureField("粘贴服务商给的密钥", text: $draft.apiKey)
-                }
-                endpointRow
-            }
-        }
-    }
-
-    /// 归一化后的完整请求地址。**这是这个界面最重要的信息**——
-    /// 用户填的地址五花八门，出问题时第一件事就是看这里拼成了什么。
-    private var endpointRow: some View {
-        let endpoint = (try? AIProvider.endpointURL(for: draft.baseURL))?.absoluteString
-        return VStack(alignment: .leading, spacing: DS.Optical.snug) {
-            Text("最终请求地址").font(DS.Fonts.label).foregroundStyle(.secondary)
-            Text(endpoint ?? "无法从当前地址拼出请求地址")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(endpoint == nil ? DS.Status.warn : .primary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var modelCard: some View {
-        DSCard(title: "模型", icon: "cpu") {
-            VStack(alignment: .leading, spacing: DS.Space.s) {
-                labeledField("文本模型") {
-                    TextField("例如 deepseek-chat、gpt-4o-mini、qwen2.5:7b", text: $draft.model)
-                }
-                labeledField("视觉模型") {
-                    TextField("留空则用文本模型", text: $draft.visionModel)
-                }
-                DSInfoRow(label: "看图时使用",
-                          value: draft.effectiveVisionModel.isEmpty ? "未填写" : draft.effectiveVisionModel,
-                          mono: true)
-            }
-        }
-    }
-
-    private var testCard: some View {
-        DSCard(title: "连接测试", icon: "bolt.horizontal") {
-            VStack(alignment: .leading, spacing: DS.Space.s) {
-                testStatus
-                HStack(spacing: DS.Space.s) {
-                    Button("测试连接") { runTest() }
-                        .controlSize(.small)
-                        .disabled(!canTest || isTesting)
-                    Text(canTest
-                         ? "会真的发一句话给服务商，但不会改动任何笔记。"
-                         : "填好服务地址、API Key 与文本模型后可测试。")
-                        .font(DS.Fonts.caption)
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var testStatus: some View {
-        switch test {
-        case .idle:
-            DSStatusBar(icon: "circle.dashed", tint: DS.Status.idle,
-                        title: "尚未测试", detail: "测试通过不代表配置永久有效，服务商侧仍可能变动。")
-        case .running:
-            DSStatusBar(icon: "bolt.horizontal", tint: DS.Palette.accent,
-                        title: "测试中…", busy: true)
-        case .ok(let detail):
-            DSStatusBar(icon: "checkmark.circle.fill", tint: DS.Status.ok,
-                        title: "连接正常", detail: detail)
-        case .failed(let detail):
-            DSStatusBar(icon: "xmark.circle.fill", tint: DS.Status.bad,
-                        title: "连接失败", detail: detail)
-        }
-    }
-
-    private func labeledField<Content: View>(_ label: String,
-                                             @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: DS.Optical.snug) {
-            Text(label).font(DS.Fonts.label).foregroundStyle(.secondary)
-            content()
-        }
-    }
-
-    // MARK: 动作
-
-    /// 三项齐了就可以测——不要求「启用」开关先打开，否则用户得先开开关才能验证配置对不对。
-    private var canTest: Bool {
-        !draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var isTesting: Bool {
-        if case .running = test { return true }
-        return false
-    }
-
-    private func runTest() {
-        guard canTest else { return }
-        // 用草稿测：用户还没保存也应该能先验证。enabled 在这里强制为真，绕开「未启用」的短路。
-        var probeConfig = draft
-        probeConfig.enabled = true
-        let probe = AIProvider(config: probeConfig)
-
-        test = .running
-        Task { @MainActor in
-            do {
-                test = .ok(try await probe.testConnection())
-            } catch {
-                test = .failed(AISettingsSheet.describe(error))
-            }
-        }
-    }
-
-    private static func describe(_ error: Error) -> String {
-        if let aiError = error as? AIError, let text = aiError.errorDescription { return text }
-        return error.localizedDescription
-    }
+    let data: [Entry]?
 }
+

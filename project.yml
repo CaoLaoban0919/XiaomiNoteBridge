@@ -1,0 +1,66 @@
+# MiNoteBridge 的 Xcode 工程定义（xcodegen generate 生成 .xcodeproj）
+#
+# ⚠️ 两份 Info.plist 并存，改授权文案时必须同步：
+# - Resources/Info.plist        → build.sh（发布式构建）用
+# - Generated/Info.plist        → 本文件 properties 生成，Xcode 工程用
+#
+# 为什么不让 xcodegen 直接用 Resources/Info.plist：
+# xcodegen 的 `info.path` 指向哪个文件就会**重写**哪个文件，字段全按模板重建。
+# 之前指向 Resources/ 直接把手工维护的授权文案全覆盖掉了（git 才救回来）。
+#
+# 与 build.sh 的关系：两者并存。
+# - build.sh：手工 swiftc + codesign，输出 build/MiNoteBridge.app；
+# - 本工程：Xcode 里 Cmd+R 直接跑，享受增量编译、断点调试。
+# 改部署目标/签名方式时两边同步。
+
+name: MiNoteBridge
+options:
+  bundleIdPrefix: local.minotebridge
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "14.0"
+
+targets:
+  MiNoteBridge:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    info:
+      # 独立生成，绝不指向 Resources/Info.plist（原因见文件头注释）
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: 米记桥
+        LSApplicationCategoryType: public.app-category.productivity
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+        NSHumanReadableCopyright: MIT License
+        # ↓ 与 Resources/Info.plist 中同名条目保持一致（协议第 5A(i) 条要求原样出现）
+        NSAppleEventsUsageDescription: >-
+          米记桥需要控制「备忘录」以完成三件事：核验笔记是否导入成功、记住笔记之间的对应关系、以及在你于小米端修改笔记后更新备忘录中的对应条目。它不会读取或修改你自行创建的备忘录。
+        NSDesktopFolderUsageDescription: 当你选择把导出的 .enex 文件保存到桌面时，米记桥需要访问该文件夹。
+        NSDocumentsFolderUsageDescription: 当你选择把导出的 .enex 文件保存到文稿文件夹时，米记桥需要访问该文件夹。
+        NSDownloadsFolderUsageDescription: 当你选择把导出的 .enex 文件保存到下载文件夹时，米记桥需要访问该文件夹。
+    settings:
+      base:
+        # SWIFT_VERSION 只接受 4.0 / 4.2 / 5.0 / 6.0。
+        # 写 5.9 这类非法值不会报配置错，但会让 SwiftUI 宏插件
+        # （SwiftUIMacros）以 malformed response 崩掉，@State 全部展开失败。
+        SWIFT_VERSION: "5.0"
+        PRODUCT_BUNDLE_IDENTIFIER: local.minotebridge.app
+        PRODUCT_NAME: MiNoteBridge
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        # ad-hoc 签名，与 build.sh 的 codesign 行为一致：
+        # 不需要开发者账号，但要能通过 Apple Events 授权弹窗
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: NO
+        # **SwiftUI 宏插件搜索路径，必须显式给全。**
+        # swiftc 命令行（build.sh）会自动把 toolchain 和 platform 两个目录
+        # 传给编译器；但 xcodegen 生成的工程里 xcbuild 只传了 platform 的，
+        # 于是 SwiftUIMacros 找不到实现，报 "malformed response"，@State 全灭。
+        OTHER_SWIFT_FLAGS: >-
+          $(inherited) -external-plugin-path
+          "$(TOOLCHAIN_DIR)/usr/lib/swift/host/macro#"
+          -external-plugin-path
+          "$(PLATFORM_DIR)/Developer/usr/lib/swift/host/macro#"

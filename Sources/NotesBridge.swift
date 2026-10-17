@@ -45,6 +45,22 @@ enum NotesBridge {
     ///
     /// - Parameter askUser: true 时若尚未决定会弹出系统授权对话框
     static func automationStatus(askUser: Bool) -> AutomationStatus {
+        // **先纯本地判断目标是否在运行，绝不为了"查权限"去碰它。**
+        //
+        // `AEDeterminePermissionToAutomateTarget` 对**未运行**的目标行为不稳定：
+        // 在部分系统版本 / 事件类组合下，它会去唤醒目标应用来完成权限判定，
+        // 而「备忘录」一旦被唤醒就会自己 activate，把键盘焦点从本应用抢走。
+        // 用户看到的就是「一启动就伴随备忘录打开、输入框打不进字」。
+        //
+        // 主界面、设置页、权限页三处 `.task` 调这里时都是 askUser == false，
+        // 在这一层挡掉之后，**启动路径上不可能再发出任何 Apple Event**。
+        // 只有用户主动点「授权」（askUser == true）时才允许 AE 去拉起它。
+        let running = !NSRunningApplication.runningApplications(withBundleIdentifier: notesBundleID).isEmpty
+        if !running && !askUser {
+            print("[NotesBridge] automationStatus: 未运行且未请求授权 → targetNotRunning（未发出任何 Apple Event）")
+            return .targetNotRunning
+        }
+
         var target = AEAddressDesc()
         let bundleBytes: [UInt8] = Array(notesBundleID.utf8)
 
@@ -57,6 +73,7 @@ enum NotesBridge {
         let cls = AEEventClass(0x2A2A2A2A)   // '****'
         let eid = AEEventID(0x2A2A2A2A)      // '****'
         let status = AEDeterminePermissionToAutomateTarget(&target, cls, eid, askUser)
+        print("[NotesBridge] automationStatus: running=\(running) askUser=\(askUser) → \(status)")
 
         switch status {
         case noErr: return .authorized

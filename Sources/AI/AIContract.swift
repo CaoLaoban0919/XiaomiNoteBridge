@@ -55,6 +55,11 @@ enum AIMessage {
     /// 带图的消息 —— 笔记里的手绘图、截图走这条。
     /// 按 OpenAI 的 content blocks 形态发送（text block + 若干 image_url block）。
     case userWithImages(text: String, images: [AIImage])
+    /// 模型上一轮的回答。
+    ///
+    /// **多轮对话必须有它**：只发 user 的话，模型每一轮都像在"第一次见到你"，
+    /// 无法引用自己刚才说过的话，也做不了"基于上次结果继续改"这种连续操作。
+    case assistant(String)
 }
 
 /// 一张要发给模型的图
@@ -81,6 +86,12 @@ enum AIError: LocalizedError {
     case http(Int, String)
     case emptyResponse
     case network(String)
+    /// 还没填 API Key——读模型列表至少要这一项，不需要模型名。
+    case missingAPIKey
+    /// 服务端没有 `/models` 接口（返回 404/405）。这类服务只能手填模型名。
+    case modelListUnsupported
+    /// 接口通了，但返回了一个空列表。
+    case modelListEmpty
 
     var errorDescription: String? {
         switch self {
@@ -89,6 +100,18 @@ enum AIError: LocalizedError {
         case .http(let code, let body): return "服务返回 HTTP \(code)：\(body)"
         case .emptyResponse: return "模型返回了空内容。"
         case .network(let m): return "网络异常：\(m)"
+        case .missingAPIKey: return "还没有填写 API Key，无法读取模型列表。"
+        case .modelListUnsupported: return "这个服务没有提供 /models 接口，请手动填写模型名。"
+        case .modelListEmpty: return "服务返回的模型列表是空的，请手动填写模型名。"
+        }
+    }
+
+    /// 这个错误是否意味着「列表这条路走不通，只能手填」。
+    /// 设置界面据此在弹窗上多给一个「手动填写」按钮，而不是让用户卡死。
+    var suggestsManualEntry: Bool {
+        switch self {
+        case .modelListUnsupported, .modelListEmpty: return true
+        default: return false
         }
     }
 }
@@ -105,6 +128,13 @@ protocol AIProviderProtocol: AnyObject {
 
     /// 连通性测试。发一句最短的话，成功时返回一句给人看的结果（含模型名）。
     func testConnection() async throws -> String
+
+    /// 读取服务端可用的模型列表（`GET {base}/models`，OpenAI 兼容格式）。
+    ///
+    /// 只要求 `baseURL` 与 `apiKey` 两项——**不要求已经填好模型名**，
+    /// 因为设置界面正是靠它「先取回列表，再让用户从里面选」。
+    /// 服务端不提供该接口时抛 `.modelListUnsupported`，界面据此回退到手动输入。
+    func fetchModels() async throws -> [String]
 }
 
 // MARK: - 笔记分析 / 重构

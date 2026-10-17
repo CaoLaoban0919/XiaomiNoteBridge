@@ -84,6 +84,23 @@ final class NoteCache: NoteCacheProtocol {
         }
     }
 
+    /// 保存「AI 改写前的原文」，**只在不存在时写一次**。
+    ///
+    /// 不能每次改写都覆盖：那样"原文"会跟着一起往后漂，
+    /// 用户点开看到的永远是上一次 AI 的版本，而不是最初的样子。
+    func saveOriginalIfAbsent(_ content: CachedNoteContent, for noteId: String) throws {
+        let url = bodiesURL.appendingPathComponent(Self.fileName(noteId) + ".original.html")
+        guard !FileManager.default.fileExists(atPath: url.path) else { return }
+        try writeFile(Data(content.html.utf8), to: url)
+    }
+
+    /// 读取 AI 改写前的原文。没有备份（历史数据、或从未被 AI 改过）时返回 nil。
+    func originalContent(for noteId: String) -> String? {
+        let url = bodiesURL.appendingPathComponent(Self.fileName(noteId) + ".original.html")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
     func imageData(fileId: String) -> Data? {
         try? Data(contentsOf: imagesURL.appendingPathComponent(Self.fileName(fileId)))
     }
