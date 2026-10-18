@@ -372,7 +372,9 @@ struct AIChatView: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .fixedSize()
+        // 不加 .fixedSize()：Menu 内部是 NSPopUpButton，
+        // fixedSize 会按"最小理想宽度"布局，自定义 label 容易被压成 0 宽——
+        // 表现就是按钮在界面上完全看不见，但代码里明明写了。外层 .frame(32) 已经够定宽。
         .help("\(session.activeSkill.name)：\(session.activeSkill.summary)")
     }
 
