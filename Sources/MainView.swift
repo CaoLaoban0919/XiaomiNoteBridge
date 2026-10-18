@@ -1485,6 +1485,12 @@ struct MainView: View {
             await pull.reloadFromCache()
             afterCacheChanged()
             clearAppliedSelection()
+
+            // 导入失败同样弹窗：写备忘录是这条链路里最"重"的动作，
+            // 静默失败会让用户以为已经导入完了。
+            if case .failed(let message) = importer.progress.phase {
+                showError("导入失败", message)
+            }
         }
     }
 
@@ -1496,6 +1502,17 @@ struct MainView: View {
         Task {
             await pull.pull()
             afterCacheChanged()
+
+            // **失败必须弹窗。**
+            // 状态条只在左栏占一行小字，用户点完「拉取」就走了，
+            // 根本不会回头看——失败得快、失败得静，等于没提示。
+            if case .failed(let message) = pull.progress.phase {
+                showError("拉取失败",
+                          message + "\n\n请依次检查：\n"
+                          + "1. 是否已登录小米账号（设置 → 账号）\n"
+                          + "2. 网络连接是否正常\n"
+                          + "3. 登录是否已过期——过期就重新登录一次")
+            }
         }
     }
 
