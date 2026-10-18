@@ -360,12 +360,14 @@ struct AIChatView: View {
             }
         } label: {
             // 每个功能键各自一颗独立的圆形玻璃按钮。
+            // 配色用 primary 的透明度而不是固定灰：深色模式下 primary 是白色，
+            // 同样的 0.08 会变成"浅色玻璃"，不会像固定灰那样在深色底上糊掉。
             Image(systemName: session.activeSkill.icon)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DS.Palette.accent)
                 .frame(width: 32, height: 32)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 0.8))
+                .background(Color.primary.opacity(0.09), in: Circle())
+                .overlay(Circle().stroke(Color.primary.opacity(0.18), lineWidth: 0.8))
                 .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)
@@ -400,8 +402,8 @@ struct AIChatView: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(DS.Palette.accent)
                     .frame(width: 32, height: 32)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 0.8))
+                    .background(Color.primary.opacity(0.09), in: Circle())
+                    .overlay(Circle().stroke(Color.primary.opacity(0.18), lineWidth: 0.8))
                     .contentShape(Circle())
 
                 if !session.pending.isEmpty {
