@@ -424,7 +424,13 @@ enum XiaomiConvert {
                 if name == "img" {
                     let fid = attrMap["fileid"] ?? ""
                     if let meta = imageMeta[fid] {
-                        out += "<en-media type=\"\(escapeXML(meta.mime))\" hash=\"\(meta.hash)\"/>"
+                        var dimensions = ""
+                        for name in ["width", "height"] {
+                            if let raw = attrMap[name], let value = Int(raw), value > 0, value <= 32768 {
+                                dimensions += " \(name)=\"\(value)\""
+                            }
+                        }
+                        out += "<en-media type=\"\(escapeXML(meta.mime))\" hash=\"\(meta.hash)\"\(dimensions)/>"
                     }
                     continue
                 }

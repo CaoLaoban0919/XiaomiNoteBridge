@@ -27,11 +27,19 @@ struct NoteRecord: Codable {
     }
 }
 
+struct PendingCopyItem: Codable {
+    var noteId: String
+    var title: String
+}
+
 struct PendingBatch: Codable {
     var file: String
     var noteIds: [String]
     var expectedCount: Int
     var createdAt: Date
+    // nil keeps older sync-state files and the normal pairing flow compatible.
+    var copyItems: [PendingCopyItem]? = nil
+    var existingAppleIds: [String]? = nil
 }
 
 struct SyncState: Codable {

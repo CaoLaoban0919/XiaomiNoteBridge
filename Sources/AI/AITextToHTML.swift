@@ -2,140 +2,16 @@ import Foundation
 
 /// 把 AI 回复的纯文本转成可插入笔记正文的 HTML。
 ///
-/// 关键职责：识别 ```` ```chart {JSON} ```` 代码块，生成内联 SVG 饼图/柱状图。
+/// 识别 chart 代码块，生成内联 SVG 分类图、函数曲线和三维曲面。
 /// 正文是 WebView，不认识 Markdown——不转换的话用户只会看到一堆 JSON。
 enum AITextToHTML {
 
     static func render(_ text: String) -> String {
-        var out: [String] = []
-        var paragraph: [String] = []
-        var listItems: [String] = []
-        var chartLines: [String] = []
-        var inChart = false
-
-        func flushParagraph() {
-            guard !paragraph.isEmpty else { return }
-            let joined = paragraph.joined(separator: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            paragraph = []
-            guard !joined.isEmpty else { return }
-            // **含公式的段落不做任何换行转换。**
-            // 上一版只保护了 HTML 转换，`<br/>` 替换仍在跑：
-            // 块级公式内部的换行被转成 `<br/>`，KaTeX 把它当强制换行，
-            // 一条公式就碎成「L =」「limu^v」「\Longrightarrow」好几行。
-            // 公式里的换行本来就该由 `\\` 控制，普通换行交给 KaTeX 自己忽略。
-            var body = typesetMath(escape(joined))
-            if !joined.contains("$") {
-                body = body.replacingOccurrences(of: "\n", with: "<br/>")
-            }
-            out.append("<p>\(body)</p>")
+        MarkdownHTML.render(text) { json in
+            guard let data = json.data(using: .utf8),
+                  let payload = try? JSONDecoder().decode(ChatChartPayload.self, from: data) else { return nil }
+            return svg(payload)
         }
-
-        func flushList() {
-            guard !listItems.isEmpty else { return }
-            let items = listItems.map { "<li>\(typesetMath(escape($0)))</li>" }.joined()
-            listItems = []
-            out.append("<ul>\(items)</ul>")
-        }
-
-        func flushBlocks() {
-            flushParagraph()
-            flushList()
-        }
-
-        func flushChart() {
-            guard !chartLines.isEmpty else { return }
-            let json = chartLines.joined(separator: "\n")
-            chartLines = []
-            if let data = json.data(using: .utf8),
-               let payload = try? JSONDecoder().decode(ChatChartPayload.self, from: data),
-               !payload.data.isEmpty {
-                out.append(svg(payload))
-            } else {
-                // 解析失败就原样保留，别吞内容
-                out.append("<pre>\(escape(json))</pre>")
-            }
-        }
-
-        for raw in text.components(separatedBy: "\n") {
-            let trimmed = raw.trimmingCharacters(in: .whitespaces)
-
-            if trimmed.hasPrefix("```") {
-                if inChart {
-                    flushChart()
-                    inChart = false
-                } else {
-                    let language = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
-                    if language.lowercased() == "chart" {
-                        flushBlocks()
-                        inChart = true
-                    } else {
-                        // 普通代码块：当普通段落处理（保留围栏）
-                        paragraph.append(raw)
-                    }
-                }
-                continue
-            }
-
-            if inChart {
-                chartLines.append(raw)
-                continue
-            }
-
-            // 空行：结束当前块
-            if trimmed.isEmpty {
-                flushBlocks()
-                continue
-            }
-
-            // 分隔线
-            if trimmed == "---" || trimmed == "***" {
-                flushBlocks()
-                out.append("<hr/>")
-                continue
-            }
-
-            // 标题：# ~ ######。不转的话 `## 三、反常积分` 会原样显示。
-            if let (level, content) = heading(trimmed) {
-                flushBlocks()
-                let tag = level <= 2 ? "h2" : (level == 3 ? "h3" : "h4")
-                out.append("<\(tag)>\(typesetMath(escape(content)))</\(tag)>")
-                continue
-            }
-
-            // 无序列表
-            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("• ") {
-                flushParagraph()
-                listItems.append(String(trimmed.dropFirst(2)))
-                continue
-            }
-            if !listItems.isEmpty { flushList() }
-
-            // 引用
-            if trimmed.hasPrefix("> ") {
-                flushParagraph()
-                out.append("<blockquote>\(typesetMath(escape(String(trimmed.dropFirst(2)))))</blockquote>")
-                continue
-            }
-
-            paragraph.append(raw)
-        }
-
-        flushBlocks()
-        if inChart { flushChart() }
-        return out.joined()
-    }
-
-    /// 解析 `## 标题`，返回层级与内容。
-    private static func heading(_ line: String) -> (Int, String)? {
-        var level = 0
-        var rest = line[...]
-        while rest.first == "#" {
-            level += 1
-            rest = rest.dropFirst()
-        }
-        guard level > 0, level <= 6, rest.first == " " else { return nil }
-        return (level, String(rest.dropFirst()).trimmingCharacters(in: .whitespaces))
     }
 
     // MARK: - SVG
@@ -147,9 +23,18 @@ enum AITextToHTML {
         "#7262FD", "#78D3F8", "#9661BC", "#F6903D",
     ]
 
-    private static func svg(_ payload: ChatChartPayload) -> String {
+    private static func svg(_ payload: ChatChartPayload) -> String? {
+        switch payload.type.lowercased() {
+        case "surface", "surface3d", "3d": return SurfaceChart.svg(payload)
+        case "line", "curve", "function", "area", "scatter": return CartesianChart.svg(payload, palette: palette)
+        case "radar", "histogram": return StatisticalChart.svg(payload, palette: palette)
+        case "pie", "bar": break
+        default: return nil
+        }
+        guard !payload.data.isEmpty, payload.data.count <= 1000, payload.data.allSatisfy({ $0.defined && $0.value.isFinite }) else { return nil }
+        if payload.type.lowercased() == "bar" { return barSVG(payload) }
         let total = payload.data.reduce(0) { $0 + $1.value }
-        guard total > 0 else { return "" }
+        guard total.isFinite, total > 0, payload.data.allSatisfy({ $0.value >= 0 }) else { return nil }
 
         let width = 640.0
         let height = 200.0
@@ -201,6 +86,21 @@ enum AITextToHTML {
         return parts.joined()
     }
 
+    private static func barSVG(_ payload: ChatChartPayload) -> String {
+        let minimum = min(0, payload.data.map(\.value).min() ?? 0)
+        let maximum = max(0, payload.data.map(\.value).max() ?? 0)
+        let span = max(maximum - minimum, 1)
+        let zero = 210 + (0 - minimum) / span * 330
+        let height = max(100, payload.data.count * 34 + 28)
+        var parts = ["<figure class=\"mn-chart\" style=\"margin:14px 0\"><figcaption>\(escape(payload.title ?? ""))</figcaption><svg width=\"640\" height=\"\(height)\" viewBox=\"0 0 640 \(height)\" xmlns=\"http://www.w3.org/2000/svg\" style=\"max-width:100%;height:auto\">"]
+        for (index, item) in payload.data.enumerated() {
+            let y = 14 + index * 34
+            let x = 210 + (item.value - minimum) / span * 330
+            parts.append("<text x=\"8\" y=\"\(y+16)\" font-size=\"13\" fill=\"currentColor\">\(escape(item.label))</text><rect x=\"\(f(min(zero,x)))\" y=\"\(y)\" width=\"\(f(abs(x-zero)))\" height=\"22\" rx=\"4\" fill=\"\(palette[index % palette.count])\"/><text x=\"628\" y=\"\(y+16)\" text-anchor=\"end\" font-size=\"13\" fill=\"currentColor\">\(f(item.value))\(escape(payload.unit ?? ""))</text>")
+        }
+        return parts.joined() + "</svg></figure>"
+    }
+
     /// 扇环路径：外弧顺时针 + 内弧逆时针，配 fill-rule=evenodd 就是真正的环。
     private static func ring(center: Double, outer: Double, inner: Double,
                              start: Double, end: Double) -> String {
@@ -231,86 +131,9 @@ enum AITextToHTML {
         return String(format: "%.1f%%", value)
     }
 
-    /// Swift 侧只做**结构**，不碰公式内容。
-    ///
-    /// 之前这里还把 `x^2` 转成 `x<sup>2</sup>`、`x_1` 转成 `x<sub>1</sub>`——
-    /// 那一步是这类 bug 的总根源：KaTeX 收到的是 HTML 而不是 LaTeX，
-    /// 结果要么渲染失败，要么被拆成几行。现在这类转换全部删掉，
-    /// 公式内容原样交给 KaTeX（社区做法：存源码，渲染时解释）。
-    private static func typesetMath(_ text: String) -> String {
-        // 含 `$` 的段落原样返回，只压平块级公式内部的物理换行
-        if text.contains("$") {
-            guard text.contains("$$") else { return text }
-            return flattenInsideDisplayMath(text)
-        }
-
-        // 裸 LaTeX 兜底：AI 经常不写 `$`，直接甩 `\iint_D f(x,y)dxdy=...`
-        if looksLikeBareLaTeX(text) {
-            let flat = text
-                .components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .joined(separator: " ")
-            return "$$\(flat)$$"
-        }
-
-        // 只剩 Markdown 粗体这一件与公式无关的事
-        return replacing(#"\*\*([^*]+)\*\*"#, with: "<strong>$1</strong>", in: text)
-    }
-
-    private static func replacing(_ pattern: String, with template: String, in text: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        let range = NSRange(text.startIndex..., in: text)
-        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: template)
-    }
-
-    /// 只压平 `$$…$$` 内部的换行，公式外的文字不动。
-    private static func flattenInsideDisplayMath(_ text: String) -> String {
-        var result = text
-        var searchStart = result.startIndex
-
-        while let open = result.range(of: "$$", range: searchStart..<result.endIndex) {
-            guard let close = result.range(of: "$$", range: open.upperBound..<result.endIndex) else {
-                break
-            }
-            let inner = result[open.upperBound..<close.lowerBound]
-            let flattened = inner
-                .split(separator: "\n", omittingEmptySubsequences: false)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-                .joined(separator: " ")
-
-            result.replaceSubrange(open.upperBound..<close.lowerBound, with: flattened)
-            // 替换后索引失效，从公式结尾之后继续找
-            searchStart = result.index(open.lowerBound, offsetBy: 2 + flattened.count + 2)
-            if searchStart >= result.endIndex { break }
-        }
-        return result
-    }
-
-    /// 判断一段文字是不是「忘了写 $ 的 LaTeX」。
-    ///
-    /// 三个条件同时满足才算：有反斜杠命令、命令属于数学类、没有成片中文。
-    /// 宁可漏判（保留原文，用户至少能读），也不要误判（把正文变成一堆乱码公式）。
-    private static func looksLikeBareLaTeX(_ text: String) -> Bool {
-        guard text.contains("\\") else { return false }
-        let commands = ["\\int", "\\iint", "\\iiint", "\\oint", "\\frac", "\\dfrac",
-                        "\\sqrt", "\\lim", "\\sum", "\\prod", "\\begin{", "\\alpha",
-                        "\\beta", "\\theta", "\\lambda", "\\sigma", "\\partial",
-                        "\\infty", "\\left", "\\right", "\\cdot", "\\times",
-                        "\\Rightarrow", "\\rightarrow", "\\equiv", "\\text"]
-        guard commands.contains(where: { text.contains($0) }) else { return false }
-
-        // **放宽中文阈值。**
-        // `\text{严格递增}` 里的中文是公式的一部分，不是"这段是散文"的证据。
-        // 阈值太低会把这类公式判成正文，结果就是用户看到一堆反斜杠。
-        let chinese = text.unicodeScalars.filter { (0x4E00...0x9FFF).contains($0.value) }.count
-        let total = max(text.unicodeScalars.count, 1)
-        return Double(chinese) / Double(total) < 0.45
-    }
-
     /// 保留两位小数，避免 SVG 里出现超长浮点
     private static func f(_ value: Double) -> String {
-        String(format: "%.2f", value)
+        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
     private static func escape(_ text: String) -> String {

@@ -48,10 +48,18 @@ final class NoteCache: NoteCacheProtocol {
     }
 
     func content(for noteId: String) -> CachedNoteContent? {
+        guard let html = html(for: noteId) else { return nil }
+        return content(for: noteId, html: html)
+    }
+
+    func html(for noteId: String) -> String? {
         let url = bodiesURL.appendingPathComponent(Self.fileName(noteId) + ".html")
         guard let data = try? Data(contentsOf: url),
               let html = String(data: data, encoding: .utf8) else { return nil }
+        return html
+    }
 
+    private func content(for noteId: String, html: String) -> CachedNoteContent {
         var ids = loadIndex().notes.first { $0.id == noteId }?.imageFileIds ?? []
         for id in Self.imageIds(inHTML: html) where !ids.contains(id) {
             ids.append(id)

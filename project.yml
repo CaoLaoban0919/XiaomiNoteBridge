@@ -26,6 +26,9 @@ targets:
     platform: macOS
     sources:
       - path: Sources
+      - path: Resources/katex
+        type: folder
+        buildPhase: resources
     info:
       # 独立生成，绝不指向 Resources/Info.plist（原因见文件头注释）
       path: Generated/Info.plist

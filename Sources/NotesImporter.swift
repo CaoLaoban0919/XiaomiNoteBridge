@@ -29,6 +29,7 @@ enum NotesImportError: LocalizedError {
     case tempFileIO(String)
 
     case scriptError(String)
+    case timedOut(TimeInterval)
 
     var errorDescription: String? {
         switch self {
@@ -46,6 +47,8 @@ enum NotesImportError: LocalizedError {
             return "临时文件读写失败：\(detail)"
         case .scriptError(let detail):
             return "AppleScript 执行出错：\(detail)"
+        case .timedOut(let seconds):
+            return NotesBridgeError.timedOut(seconds).localizedDescription
         }
     }
 }
@@ -423,6 +426,8 @@ enum NotesImporter {
             return try await NotesBridge.run(script)
         } catch let e as NotesBridgeError {
             throw classify(e)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw NotesImportError.scriptError("\(context)：\(error.localizedDescription)")
         }
@@ -432,6 +437,8 @@ enum NotesImporter {
         switch error {
         case .notAuthorized:
             return .notAuthorized
+        case .timedOut(let seconds):
+            return .timedOut(seconds)
         case .scriptFailed(let msg):
             if let code = extractErrorCode(msg) {
                 switch code {

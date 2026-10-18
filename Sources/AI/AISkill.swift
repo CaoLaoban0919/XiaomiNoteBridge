@@ -35,7 +35,7 @@ struct AISkill: Identifiable, Hashable {
             规则：
             1. 先判断这段内容在讲什么，再决定层级：主标题用 `##`，子项用 `###`。
             2. 并列内容用无序列表；有先后顺序的用有序列表。
-            3. 公式一律用 LaTeX（`$…$` 或 `$$…$$`）；占比/对比用 `chart` 代码块。
+            3. 公式一律用 LaTeX（`$…$` 或 `$$…$$`）；图表用 `chart` 代码块，支持 pie/bar/line/area/scatter/radar/histogram，直方图传原始 samples、散点图传 x/y，不能编造源数据；函数曲线使用 function，三维曲面使用 surface 和 x、y 算式。
             4. 原文里的事实、数字、专有名词一个字都不能改。
             5. 只输出整理后的正文，不要写"以下是整理结果"这类前言。
             """

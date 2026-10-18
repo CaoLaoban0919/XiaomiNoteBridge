@@ -5,11 +5,13 @@ import Carbon
 enum NotesBridgeError: LocalizedError {
     case notAuthorized
     case scriptFailed(String)
+    case timedOut(TimeInterval)
 
     var errorDescription: String? {
         switch self {
         case .notAuthorized: return "尚未获得「备忘录」的自动化权限。"
         case .scriptFailed(let msg): return "AppleScript 执行失败：\(msg)"
+        case .timedOut(let seconds): return "「备忘录」在 \(Int(seconds)) 秒内没有响应。请先关闭备忘录中的导入确认或其他弹窗，再重试；若已导入，请先核对结果，避免重复导入。"
         }
     }
 }
@@ -97,41 +99,22 @@ enum NotesBridge {
         }
     }
 
-    static func run(_ script: String) async throws -> String {
-        try await withCheckedThrowingContinuation { cont in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do { cont.resume(returning: try runSync(script)) }
-                catch { cont.resume(throwing: error) }
-            }
-        }
-    }
-
-    private static func runSync(_ script: String) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-
-        do { try process.run() }
+    static func run(_ script: String, timeout: TimeInterval = 30) async throws -> String {
+        let result: ScriptProcess.Output
+        do {
+            result = try await ScriptProcess.run(executable: URL(fileURLWithPath: "/usr/bin/osascript"),
+                                                 arguments: ["-e", script], timeout: timeout)
+        } catch ScriptProcess.Failure.timedOut { throw NotesBridgeError.timedOut(timeout) }
+        catch ScriptProcess.Failure.cancelled { throw CancellationError() }
+        catch is CancellationError { throw CancellationError() }
         catch { throw NotesBridgeError.scriptFailed(error.localizedDescription) }
-
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        let outStr = String(data: outData, encoding: .utf8) ?? ""
-        let errStr = String(data: errData, encoding: .utf8) ?? ""
-
-        guard process.terminationStatus == 0 else {
+        let outStr = result.stdout, errStr = result.stderr
+        guard result.status == 0 else {
             if errStr.contains("-1743") || errStr.localizedCaseInsensitiveContains("Not authorized") {
                 throw NotesBridgeError.notAuthorized
             }
             let detail = errStr.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw NotesBridgeError.scriptFailed(detail.isEmpty ? "退出码 \(process.terminationStatus)" : detail)
+            throw NotesBridgeError.scriptFailed(detail.isEmpty ? "退出码 \(result.status)" : detail)
         }
         return outStr.trimmingCharacters(in: .whitespacesAndNewlines)
     }

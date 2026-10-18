@@ -31,6 +31,9 @@ struct WebNoteEditor: NSViewRepresentable {
 
     @Binding var command: NoteEditorCommand?
 
+    var onRenderError: ((String) -> Void)? = nil
+    @Environment(\.colorScheme) private var colorScheme
+
     func makeCoordinator() -> WebNoteEditorCoordinator { WebNoteEditorCoordinator(self) }
 
     func makeNSView(context: Context) -> WKWebView {
@@ -44,6 +47,7 @@ struct WebNoteEditor: NSViewRepresentable {
         proxy.target = context.coordinator
         userController.add(proxy, name: "changed")
         userController.add(proxy, name: "height")
+        userController.add(proxy, name: "mathError")
 
         userController.addUserScript(
             WKUserScript(
@@ -70,7 +74,7 @@ struct WebNoteEditor: NSViewRepresentable {
         // WKWebView 默认按 light 解析 `prefers-color-scheme`，即使系统在深色模式：
         // 于是 @media 里的浅色文字规则永远不触发，正文一直用深灰字压在深色底上——
         // 表现就是"深色模式下文字看不见"。nil = 继承窗口的 effectiveAppearance。
-        webView.appearance = nil
+        webView.appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
         context.coordinator.webView = webView
         context.coordinator.load(html: html, images: images, editable: isEditable)
         return webView
@@ -79,6 +83,7 @@ struct WebNoteEditor: NSViewRepresentable {
     func updateNSView(_ webView: WKWebView, context: Context) {
 
         context.coordinator.parent = self
+        webView.appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
 
         let hash = Self.contentHash(html: html, images: images)
         if context.coordinator.appliedHash != hash {
@@ -119,7 +124,7 @@ struct WebNoteEditor: NSViewRepresentable {
             timer = setTimeout(function() {
                 timer = null;
                 try {
-                    window.webkit.messageHandlers.changed.postMessage(document.body.innerHTML);
+                    window.webkit.messageHandlers.changed.postMessage({token:window.__mnDocumentToken,html:window.MiNoteMath ? window.MiNoteMath.canonicalHTML() : document.body.innerHTML});
                 } catch (e) {}
             }, 300);
         }, true);
@@ -149,7 +154,7 @@ struct WebNoteEditor: NSViewRepresentable {
                 var h = Math.ceil(document.body.scrollHeight);
                 if (h > 0 && h !== last) {
                     last = h;
-                    window.webkit.messageHandlers.height.postMessage(h);
+                    window.webkit.messageHandlers.height.postMessage({token:window.__mnDocumentToken,height:h});
                 }
             } catch (e) {}
         }
@@ -173,6 +178,8 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
     private(set) var appliedHash: Int?
 
     private(set) var isEditable: Bool
+    private var reportedErrors = Set<String>()
+    private var documentToken = UUID().uuidString
 
     init(_ parent: WebNoteEditor) {
         self.parent = parent
@@ -183,25 +190,12 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
     func load(html: String, images: [String: Data], editable: Bool) {
         isEditable = editable
         let prepared = WebNoteHTMLBridge.preparingImagesForDisplay(html, images: images)
-        let document = WebNoteHTMLBridge.fullDocument(prepared, editable: editable)
+        documentToken = UUID().uuidString
+        let document = WebNoteHTMLBridge.fullDocument(prepared, editable: editable).replacingOccurrences(of: "<head>", with: "<head><script>window.__mnDocumentToken=\"\(documentToken)\";</script>")
         appliedHash = WebNoteEditor.contentHash(html: html, images: images)
-        // **必须写成临时文件再用 loadFileURL 加载。**
-        // `loadHTMLString(_:baseURL:)` 虽然能给出 baseURL，但 WKWebView 不会
-        // 把 baseURL 当作"可读目录"授予权限——katex.min.js 之类的相对资源
-        // 会被安全策略静默拦掉，表现就是公式永远不渲染、`$$` 原样显示。
-        // loadFileURL 的 allowingReadAccessTo 才是真正放行读取的入口。
-        let fileURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("note-\(UUID().uuidString).html")
-        do {
-            try document.write(to: fileURL, atomically: true, encoding: .utf8)
-            webView?.loadFileURL(
-                fileURL,
-                allowingReadAccessTo: URL(fileURLWithPath: "/", isDirectory: true)
-            )
-        } catch {
-            // 写文件失败就退回老路径：公式可能不渲染，但正文不能空白
-            webView?.loadHTMLString(document, baseURL: Bundle.main.resourceURL)
-        }
+        reportedErrors.removeAll()
+        (webView as? PassthroughWebView)?.containsSurface = html.contains("data-surface=")
+        webView?.loadHTMLString(document, baseURL: nil)
     }
 
     func setEditable(_ editable: Bool) {
@@ -330,15 +324,18 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
         didReceive message: WKScriptMessage
     ) {
 
-        if message.name == "height" {
-            let raw: Double
-            if let d = message.body as? Double {
-                raw = d
-            } else if let i = message.body as? Int {
-                raw = Double(i)
-            } else {
-                return
+        if message.name == "mathError" {
+            let detail = (message.body as? [String: Any])?["message"] as? String ?? "公式无法显示"
+            if reportedErrors.insert(detail).inserted {
+                DispatchQueue.main.async { [weak self] in self?.parent.onRenderError?(detail + "\n原始公式已保留，请检查公式命令或重新生成该段内容。") }
             }
+            return
+        }
+
+        if message.name == "height" {
+            guard let payload = message.body as? [String: Any],
+                  payload["token"] as? String == documentToken,
+                  let raw = payload["height"] as? Double, raw.isFinite else { return }
             guard raw > 0 else { return }
             let height = CGFloat(raw)
 
@@ -348,7 +345,8 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
             return
         }
 
-        guard message.name == "changed", let raw = message.body as? String else { return }
+        guard message.name == "changed", let payload = message.body as? [String: Any],
+              payload["token"] as? String == documentToken, let raw = payload["html"] as? String else { return }
 
         let fragment = WebNoteHTMLBridge.restoringImages(in: raw, images: parent.images)
 
@@ -360,8 +358,26 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
 }
 
 final class PassthroughWebView: WKWebView {
+    var containsSurface = false
 
     override func scrollWheel(with event: NSEvent) {
+        guard containsSurface else { forwardScroll(event); return }
+        let point = convert(event.locationInWindow, from: nil)
+        let y = isFlipped ? point.y : bounds.height - point.y
+        guard point.x.isFinite, y.isFinite else { forwardScroll(event); return }
+        // 正文由外层 ScrollView 滚动；只有指针位于三维图时才让网页接收滚轮。
+        evaluateJavaScript("Boolean(document.elementFromPoint(\(point.x),\(y))?.closest('svg[data-surface]'))") { [weak self] value, _ in
+            guard let self else { return }
+            if value as? Bool == true { self.deliverSurfaceScroll(event) }
+            else { self.forwardScroll(event) }
+        }
+    }
+
+    private func deliverSurfaceScroll(_ event: NSEvent) {
+        super.scrollWheel(with: event)
+    }
+
+    private func forwardScroll(_ event: NSEvent) {
         guard let inner = innerScrollView() else {
             super.nextResponder?.scrollWheel(with: event)
             return
@@ -406,51 +422,28 @@ enum WebNoteHTMLBridge {
 
     static func fullDocument(_ body: String, editable: Bool) -> String {
         let editableAttr = editable ? "true" : "false"
-        // **KaTeX 用绝对 file:// 路径。**
-        // 正文 HTML 写在临时目录里，相对路径 `katex/...` 会指向临时目录而不是
-        // app 的 Resources——资源 404，公式就永远是 `$$` 源码。
-        let resources = Bundle.main.resourceURL?.absoluteString ?? ""
+        let body = repairingLegacyTables(body.replacingOccurrences(of: #"<script\b[^>]*>[\s\S]*?</script\s*>"#, with: "", options: [.regularExpression, .caseInsensitive]))
         return """
-        <!doctype html><html><head><meta charset="utf-8">\
-        <link rel="stylesheet" href="\(resources)katex/katex.min.css">\
-        <style>\(documentCSS)</style>\
-        <script src="\(resources)katex/katex.min.js"></script>\
-        <script src="\(resources)katex/auto-render.min.js"></script>\
-        </head>\
-        <body contenteditable="\(editableAttr)">\(body)\
-        <script>\(mathRenderJS)</script></body></html>
+        <!doctype html><html><head><meta charset="utf-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;unsafe-inline&#39;; style-src &#39;unsafe-inline&#39;; font-src data:; img-src data:;">
+        <style>\(documentCSS)</style>\(MathWebDocument.head())
+        </head><body contenteditable="\(editableAttr)">\(body)</body></html>
         """
     }
 
-    /// 扫描正文里的 `$…$` / `$$…$$` 并渲染成公式。
-    ///
-    /// 两个约束：
-    /// 1. `contenteditable="false"` —— 否则用户一点进去改字，WebKit 会把
-    ///    KaTeX 生成的几十层 `<span>` 拆散，公式直接变成乱码。
-    /// 2. `throwOnError: false` —— 写错的公式保留原文，别在正文里炸出一片红字。
-    static let mathRenderJS = """
-    (function() {
-        if (typeof renderMathInElement !== 'function') return;
-        try {
-            renderMathInElement(document.body, {
-                delimiters: [
-                    { left: '$$', right: '$$', display: true },
-                    { left: '\\\\[', right: '\\\\]', display: true },
-                    { left: '$', right: '$', display: false },
-                    { left: '\\\\(', right: '\\\\)', display: false }
-                ],
-                throwOnError: false,
-                strict: false,
-                // \text{中文} 默认会报错（KaTeX 按 XeTeX 行为处理非 ASCII）。
-                // 打开它，中文说明文字才能正常出现在公式里。
-                unicodeTextInMathMode: true
-            });
-            document.querySelectorAll('.katex').forEach(function(el) {
-                el.setAttribute('contenteditable', 'false');
-            });
-        } catch (e) {}
-    })();
-    """
+    static func repairingLegacyTables(_ html: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"<p\b[^>]*>((?:(?!</p>)[\s\S])*)</p>"#, options: .caseInsensitive) else { return html }
+        let source = html as NSString
+        let result = NSMutableString(string: html)
+        for match in regex.matches(in: html, range: NSRange(location: 0, length: source.length)).reversed() {
+            let inner = source.substring(with: match.range(at: 1))
+            let raw = inner.replacingOccurrences(of: #"<br\s*/?>"#, with: "\n", options: [.regularExpression, .caseInsensitive])
+            guard !raw.contains("<"), raw.contains("|") || raw.contains("｜") else { continue }
+            let rendered = AITextToHTML.render(XiaomiConvert.decodeEntities(raw))
+            if rendered.contains("<table>") { result.replaceCharacters(in: match.range, with: rendered) }
+        }
+        return result as String
+    }
 
     static let documentCSS = """
     :root { color-scheme: light dark; }
@@ -486,6 +479,12 @@ enum WebNoteHTMLBridge {
     p { margin: 0.6em 0; }
     ul, ol { padding-left: 1.4em; }
     img { max-width: 100%; height: auto; }
+    .mn-table-scroll { max-width:100%; overflow-x:auto; }
+    table { border-collapse:collapse; min-width:60%; margin:0.6em 0; }
+    th, td { padding:8px 12px; border:1px solid #8886; text-align:left; }
+    th { background:#8882; }
+    pre { max-width:100%; overflow-x:auto; padding:10px; background:#8881; }
+    blockquote { margin-left:0; padding-left:12px; border-left:3px solid #8886; }
 
     @media (prefers-color-scheme: dark) {
         body { color: #e6e6e8; }

@@ -2,6 +2,7 @@ import SwiftUI
 import Foundation
 import AppKit
 import WebKit
+import UniformTypeIdentifiers
 
 private enum SidebarSelection: Hashable {
     case all
@@ -14,19 +15,26 @@ let mainViewNoteCache = NoteCache()
 struct MainView: View {
     @EnvironmentObject private var onboarding: OnboardingState
 
-    @StateObject private var pull = PullEngine(cache: mainViewNoteCache)
+    @StateObject private var pull: PullEngine
 
-    @StateObject private var importer = ImportEngine(cache: mainViewNoteCache)
+    @StateObject private var importer: ImportEngine
 
-    private var cache: NoteCacheProtocol { mainViewNoteCache }
+    private let cache: NoteCacheProtocol
+
+    init(cache: NoteCacheProtocol = mainViewNoteCache,
+         importServices: ImportEngine.Services = ImportEngine.Services()) {
+        self.cache = cache
+        _pull = StateObject(wrappedValue: PullEngine(cache: cache))
+        _importer = StateObject(wrappedValue: ImportEngine(cache: cache, services: importServices))
+    }
 
     @State private var sidebarSelection: SidebarSelection? = .all
     @State private var selectedNoteID: String?
 
     @State private var importSelection: Set<String> = []
 
-    @State private var approvalPlan: ChangePlan?
-    @State private var showingImportApproval = false
+    @State private var importApproval: ImportApprovalRequest?
+    @State private var confirmingDiscardPendingImport = false
     @State private var showingPermissions = false
     @State private var showingSettings = false
 
@@ -38,6 +46,12 @@ struct MainView: View {
         let id = UUID()
         var title: String
         var message: String
+    }
+
+    private struct ImportApprovalRequest: Identifiable {
+        let id = UUID()
+        let noteIds: [String]
+        let plan: ChangePlan
     }
 
     private func showError(_ title: String, _ message: String) {
@@ -271,13 +285,26 @@ struct MainView: View {
         }
         .sheet(isPresented: $showingPermissions) { PermissionListSheet() }
         .sheet(isPresented: $showingSettings) { SettingsSheet() }
+        .confirmationDialog("确认上次批次尚未导入？", isPresented: $confirmingDiscardPendingImport, titleVisibility: .visible) {
+            Button("确认未导入，解除等待", role: .destructive) { importer.discardPendingBatch() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("请先在备忘录中取消旧的导入弹窗并核对结果。解除等待后可以重新导入；如果旧批次实际已经接收，再次导入可能产生重复笔记。")
+        }
 
-        .sheet(isPresented: $showingImportApproval) {
-            if let plan = approvalPlan {
-                ImportApprovalSheet(plan: plan) { approvedOverwrites in
-                    startImport(approvedOverwrites: approvedOverwrites)
-                }
-            }
+        .sheet(item: $importApproval) { request in
+            ImportApprovalSheet(plan: request.plan,
+                                copyFilename: copyFilename(noteIds: request.noteIds),
+                                onSaveCopy: { try await importer.copyFileData(noteIds: request.noteIds) },
+                                onImportCopy: { startCopyImport(noteIds: request.noteIds) },
+                                onExecute: { approvedOverwrites in
+                                    startImport(noteIds: request.noteIds, approvedOverwrites: approvedOverwrites)
+                                })
+        }
+        .alert(item: $errorAlert) { alert in
+            Alert(title: Text(alert.title),
+                  message: Text(alert.message),
+                  dismissButton: .default(Text("知道了")))
         }
 
         .onAppear {
@@ -371,6 +398,16 @@ struct MainView: View {
                     if importer.isRunning {
                         Button("停止导入") { importer.cancel() }
                             .controlSize(.small)
+                    }
+                    if let file = importer.pendingFileURL {
+                        Button("在 Finder 中显示导入文件") {
+                            NSWorkspace.shared.activateFileViewerSelecting([file])
+                        }
+                        .controlSize(.small)
+                        if !importer.isRunning {
+                            Button("已确认未导入，解除等待…") { confirmingDiscardPendingImport = true }
+                                .controlSize(.small)
+                        }
                     }
                 }
 
@@ -633,12 +670,6 @@ struct MainView: View {
         } message: {
             Text("它会从所有文件夹中消失，但仍能在回收站里找到并恢复。")
         }
-        .alert(item: $errorAlert) { alert in
-            Alert(title: Text(alert.title),
-                  message: Text(alert.message),
-                  dismissButton: .default(Text("知道了")))
-        }
-
         .overlay(alignment: .bottom) { toastOverlay }
 
         .task(id: note.id) {
@@ -685,7 +716,8 @@ struct MainView: View {
                 WebNoteEditor(html: $originalHTML,
                               images: noteImages,
                               contentHeight: $originalBodyHeight,
-                              command: $editorCommand)
+                              command: $editorCommand,
+                              onRenderError: { showError("公式显示失败", $0) })
                     .frame(height: max(originalBodyHeight, 240))
             }
         } else {
@@ -712,7 +744,8 @@ struct MainView: View {
                 WebNoteEditor(html: $noteHTML,
                               images: noteImages,
                               contentHeight: $noteBodyHeight,
-                              command: $editorCommand)
+                              command: $editorCommand,
+                              onRenderError: { showError("公式显示失败", $0) })
 
                     .frame(height: max(noteBodyHeight, 240))
             } else {
@@ -808,29 +841,24 @@ struct MainView: View {
         // 走 AITextToHTML：它会把 ```chart 代码块转成内联 SVG。
         // 这里不再过 NotesHTMLSanitizer——它不认识 <svg>，会把整张图删掉；
         // 而文本部分已由 AITextToHTML 自己转义过了。
-        Task { @MainActor in
-            var addition = AITextToHTML.render(text)
+        guard selectedNoteID == note.id else { return }
+        let addition = AITextToHTML.render(text)
+        guard !addition.isEmpty else { return }
 
-            // **块级公式转图片。**
-            // KaTeX 的 HTML 是一棵几十层 span 的树，导入 Apple Notes 时会被打散，
-            // 用户看到「σ∫α」这种残缺字符。PNG 作为附件进去，不会变形。
-            addition = await MathImageRenderer.replaceDisplayMath(in: addition)
+        let previous = noteHTML
+        let appended = previous + addition
+        noteHTML = appended
+        chat.noteContext = AIChatSession.NoteContext(title: note.title, html: appended)
+        scheduleBodySave(appended, note: note)
 
-            guard !addition.isEmpty else { return }
-
-            let previous = noteHTML
-            // 追加而不是替换：原文一个字都不能动，AI 的内容接在后面
-            noteHTML = previous + addition
-            chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
-
-            // 复用编辑器既有的自动保存（600ms 防抖 → 写本地缓存）
-            scheduleBodySave(noteHTML, note: note)
-
-            showToast("已添加到正文末尾") { [previous] in
-                noteHTML = previous
-                chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
-                scheduleBodySave(previous, note: note)
+        showToast("已添加到正文末尾") { [previous, appended] in
+            guard selectedNoteID == note.id, noteHTML == appended else {
+                showError("无法撤销此次追加", "笔记已切换或追加后又有编辑。为保护后续内容，没有覆盖正文；请在正文中删除不需要的部分。")
+                return
             }
+            noteHTML = previous
+            chat.noteContext = AIChatSession.NoteContext(title: note.title, html: previous)
+            scheduleBodySave(previous, note: note)
         }
     }
 
@@ -1176,15 +1204,30 @@ struct MainView: View {
 
     private func openImportApproval() {
         guard canImport else { return }
+        // 自动保存有防抖；导入前必须先提交当前正文，不能导出半秒前的旧内容。
+        if let note = selectedNote, importSelection.contains(note.id), !showingOriginal, noteHTML != persistedHTML {
+            do {
+                bodySaveTask?.cancel()
+                try cache.saveHTML(noteHTML, for: note.id)
+                persistedHTML = noteHTML
+            } catch {
+                showError("导入前保存失败", error.localizedDescription)
+                return
+            }
+        }
         let ids = pull.notes.filter { importSelection.contains($0.id) }.map(\.id)
         guard !ids.isEmpty else { return }
-        approvalPlan = importer.plan(noteIds: ids)
-        showingImportApproval = true
+        importApproval = ImportApprovalRequest(noteIds: ids, plan: importer.plan(noteIds: ids))
     }
 
-    private func startImport(approvedOverwrites: Set<String>) {
-        let ids = pull.notes.filter { importSelection.contains($0.id) }.map(\.id)
+    private func copyFilename(noteIds: [String]) -> String {
+        let title = noteIds.count == 1 ? pull.notes.first(where: { $0.id == noteIds[0] })?.title : nil
+        let safeTitle = (title ?? "米记桥-笔记").components(separatedBy: CharacterSet(charactersIn: "/:\\").union(.controlCharacters))
+            .filter { !$0.isEmpty }.joined(separator: "-").trimmingCharacters(in: .whitespacesAndNewlines)
+        return String((safeTitle.isEmpty ? "笔记" : safeTitle).prefix(80)) + "-副本.enex"
+    }
 
+    private func startImport(noteIds ids: [String], approvedOverwrites: Set<String>) {
         guard !ids.isEmpty, !importer.isRunning, !pull.isRunning else { return }
         importStarted = true
 
@@ -1197,6 +1240,18 @@ struct MainView: View {
 
             if case .failed(let message) = importer.progress.phase {
                 showError("导入失败", message)
+            }
+        }
+    }
+
+    private func startCopyImport(noteIds ids: [String]) {
+        guard !ids.isEmpty, !importer.isRunning, !pull.isRunning else { return }
+        importStarted = true
+        Task {
+            await importer.startCopies(noteIds: ids)
+            clearAppliedSelection()
+            if case .failed(let message) = importer.progress.phase {
+                showError("副本导入未完成", message)
             }
         }
     }
@@ -1305,6 +1360,7 @@ struct MainView: View {
 
     private var importPhaseDetail: String {
         let progress = importer.progress
+        if let detail = progress.detail, !detail.isEmpty { return detail }
         if let title = progress.currentTitle {
             return "正在处理「\(title)」（\(progress.completed)/\(progress.total)）"
         }
@@ -1599,16 +1655,35 @@ struct PermissionListSheet: View {
     }
 }
 
+private struct ENEXCopyDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [UTType(importedAs: "com.evernote.enex", conformingTo: .xml)] }
+    var data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
+}
+
 private struct ImportApprovalSheet: View {
     let plan: ChangePlan
+    let copyFilename: String
+    let onSaveCopy: () async throws -> Data
+    let onImportCopy: () -> Void
 
     let onExecute: (Set<String>) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
+    @State private var overwriteUpdates = false
+
     @State private var approved: Set<String> = []
 
     @State private var skipped: Set<String> = []
+    @State private var copyTask: Task<Void, Never>?
+    @State private var preparingCopy = false
+    @State private var showingCopyExporter = false
+    @State private var copyDocument: ENEXCopyDocument?
+    @State private var copyError: String?
+    @State private var savedCopyURL: URL?
 
     private var executableCreates: [PlannedChange] {
         plan.creates.filter { $0.blockedReason == nil }
@@ -1626,18 +1701,28 @@ private struct ImportApprovalSheet: View {
         plan.needsApproval.filter { !approved.contains($0.id) && !skipped.contains($0.id) }
     }
 
+    private var blockedOverwrites: [PlannedChange] {
+        plan.overwrites.filter { $0.blockedReason != nil }
+    }
+
+    private var approvedOverwrites: Set<String> {
+        overwriteUpdates ? approved.intersection(plan.needsApproval.map(\.id)) : []
+    }
+
     private var canExecute: Bool {
-        !lowRiskChanges.isEmpty || !approved.isEmpty
+        !lowRiskChanges.isEmpty || !approvedOverwrites.isEmpty
     }
 
     private var summaryTitle: String {
         var parts: [String] = []
         if !executableCreates.isEmpty { parts.append("新建 \(executableCreates.count) 条") }
         if !executableMoves.isEmpty { parts.append("归入文件夹 \(executableMoves.count) 条") }
-        if !plan.needsApproval.isEmpty {
-            parts.append("覆盖 \(plan.needsApproval.count) 条已有笔记的正文")
+        if !approvedOverwrites.isEmpty {
+            parts.append("覆盖更新 \(approvedOverwrites.count) 条已有笔记的正文")
         }
         if parts.isEmpty {
+            if !plan.needsApproval.isEmpty { return "尚未批准覆盖更新已有笔记" }
+            if !blockedOverwrites.isEmpty { return "所选已有笔记暂不支持覆盖更新" }
             return plan.isEmpty ? "这次没有需要变更的内容" : "这次没有可执行的变更"
         }
         return "将" + parts.joined(separator: "、") + "。"
@@ -1646,13 +1731,16 @@ private struct ImportApprovalSheet: View {
     private var summaryDetail: String {
         if plan.needsApproval.isEmpty {
             if plan.isEmpty { return "勾选的笔记都已经是最新状态，不必再写一遍。" }
+            if !blockedOverwrites.isEmpty {
+                return "已找到 \(blockedOverwrites.count) 条已关联笔记，但本次均无法覆盖更新。原笔记保持不变，具体原因见下方；若同时选有新笔记，只导入可执行的新笔记。"
+            }
             if lowRiskChanges.isEmpty { return "选中的笔记这次都无法执行，原因在下面。" }
             return "新建的笔记之后能自己删，归位只是挪文件夹——都不会覆盖已有内容，会随「执行」一并完成。"
         }
-        if lowRiskChanges.isEmpty {
-            return "覆盖会把「备忘录」里那条笔记的正文换成小米侧的版本，写掉就找不回来——请逐条确认；用「全部覆盖」可以一次批准剩下的全部。"
+        if !overwriteUpdates {
+            return "当前不覆盖更新：已导入的笔记会跳过，未导入的笔记仍会新建。如需替换已有正文，请开启下面的「覆盖更新已有笔记」。"
         }
-        return "新建 / 归位这类可逆变更会随「执行」一并完成；覆盖会把正文换掉，写掉就找不回来——请逐条确认。"
+        return "覆盖更新会用本地当前正文替换「备忘录」中已关联笔记的正文，原内容可能无法恢复。当前暂不支持图片、公式或图表，这些条目仍会跳过；已批准的条目可在下方逐条取消。"
     }
 
     private var summaryIcon: String {
@@ -1667,16 +1755,25 @@ private struct ImportApprovalSheet: View {
 
     private var footerNote: String {
         guard canExecute else {
+            if !blockedOverwrites.isEmpty && plan.needsApproval.isEmpty {
+                return "原笔记保持不变；可将副本存入 Apple 备忘录，或保存副本文件。"
+            }
             if plan.needsApproval.isEmpty { return "这次没有可以执行的变更。" }
+            if !overwriteUpdates { return "如需更新已有笔记，请开启「覆盖更新已有笔记」；不更新可点「取消」。" }
             return "至少批准一条覆盖才能执行；一条都不想要就点「取消」。"
         }
         var parts: [String] = []
         if !lowRiskChanges.isEmpty { parts.append("低危变更 \(lowRiskChanges.count) 条一并放行") }
-        if !approved.isEmpty { parts.append("覆盖 \(approved.count) 条") }
-        if !skipped.isEmpty { parts.append("跳过 \(skipped.count) 条") }
-        if !pendingOverwrites.isEmpty {
+        if !approvedOverwrites.isEmpty { parts.append("覆盖更新 \(approvedOverwrites.count) 条") }
+        if !overwriteUpdates && !plan.needsApproval.isEmpty {
+            parts.append("跳过已有笔记 \(plan.needsApproval.count) 条")
+        } else if !skipped.isEmpty {
+            parts.append("跳过 \(skipped.count) 条")
+        }
+        if overwriteUpdates && !pendingOverwrites.isEmpty {
             parts.append("还有 \(pendingOverwrites.count) 条未决定，不会执行")
         }
+        if !plan.blocked.isEmpty { parts.append("无法执行 \(plan.blocked.count) 条，原笔记保留") }
         return parts.joined(separator: " · ")
     }
 
@@ -1712,8 +1809,10 @@ private struct ImportApprovalSheet: View {
                                 title: summaryTitle,
                                 detail: summaryDetail)
 
+                    copyFileCard
                     if !lowRiskChanges.isEmpty { lowRiskCard }
-                    if !plan.needsApproval.isEmpty { overwriteSection }
+                    overwriteUpdateChoice
+                    if overwriteUpdates && !plan.needsApproval.isEmpty { overwriteSection }
                     if !plan.blocked.isEmpty { blockedCard }
                 }
                 .padding(DS.Space.xl)
@@ -1723,24 +1822,84 @@ private struct ImportApprovalSheet: View {
             Divider()
 
             DSFooter(note: footerNote) {
-                Button("取消") { dismiss() }
+                Button("取消") { copyTask?.cancel(); dismiss() }
                     .keyboardShortcut(.cancelAction)
+                Button(preparingCopy ? "正在生成副本…" : "保存副本文件…") { prepareCopyFile() }
+                    .disabled(preparingCopy)
                 Button("执行") {
-                    onExecute(approved)
+                    onExecute(approvedOverwrites)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(!canExecute)
+                .disabled(!canExecute || preparingCopy)
             }
         }
         .frame(width: 720, height: 620)
+        .fileExporter(isPresented: $showingCopyExporter,
+                      document: copyDocument,
+                      contentType: ENEXCopyDocument.readableContentTypes[0],
+                      defaultFilename: copyFilename) { result in
+            switch result {
+            case .success(let url): savedCopyURL = url
+            case .failure(let error): copyError = error.localizedDescription
+            }
+            copyDocument = nil
+        }
+        .onDisappear { copyTask?.cancel() }
+    }
+
+    private var copyFileCard: some View {
+        DSCard(title: "保存独立副本", icon: "doc.on.doc") {
+            VStack(alignment: .leading, spacing: DS.Space.s) {
+                Text("将本次选中的笔记作为新副本存入 Apple 备忘录，包含本地正文、图片及公式和图表的渲染图片。副本标题依次添加（1）、（2）等编号，自动避开已有标题，原笔记及原关联保留。点击「副本存入 Apple 备忘录」后，还需在备忘录弹窗确认「导入」；也可单独保存 ENEX 副本文件。")
+                    .font(DS.Fonts.label)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("副本存入 Apple 备忘录") {
+                    onImportCopy()
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(preparingCopy)
+                if preparingCopy {
+                    HStack { ProgressView().controlSize(.small); Text("正在准备正文和附件…").font(DS.Fonts.label) }
+                }
+                if let copyError {
+                    Text("副本保存失败：" + copyError).font(DS.Fonts.label).foregroundStyle(DS.Status.bad)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let savedCopyURL {
+                    Text("副本已保存：" + savedCopyURL.path).font(DS.Fonts.label).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("在 Finder 中显示副本") { NSWorkspace.shared.activateFileViewerSelecting([savedCopyURL]) }
+                }
+            }
+        }
+    }
+
+    private func prepareCopyFile() {
+        guard !preparingCopy else { return }
+        preparingCopy = true
+        copyError = nil
+        savedCopyURL = nil
+        copyTask = Task { @MainActor in
+            defer { preparingCopy = false; copyTask = nil }
+            do {
+                let data = try await onSaveCopy()
+                try Task.checkCancellation()
+                copyDocument = ENEXCopyDocument(data: data)
+                showingCopyExporter = true
+            } catch is CancellationError {
+                // Closing approval cancels preparation without writing a file.
+            } catch { copyError = error.localizedDescription }
+        }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             Text("变更审批").font(DS.Fonts.screenTitle)
-            Text("这是本次导入会对「备忘录」做的全部改动。可逆的批量放行，不可逆的逐条确认。")
+            Text("可将副本存入 Apple 备忘录、另存文件，或确认导入改动。")
                 .font(DS.Fonts.label)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1773,6 +1932,37 @@ private struct ImportApprovalSheet: View {
         }
     }
 
+    private var overwriteUpdateChoice: some View {
+        DSCard(title: "是否覆盖更新", icon: "arrow.triangle.2.circlepath") {
+            VStack(alignment: .leading, spacing: DS.Space.s) {
+                Toggle("覆盖更新已有笔记", isOn: Binding(
+                    get: { overwriteUpdates },
+                    set: { enabled in
+                        overwriteUpdates = enabled
+                        approved = enabled ? Set(plan.needsApproval.map(\.id)) : []
+                        skipped.removeAll()
+                    }
+                ))
+                .disabled(plan.needsApproval.isEmpty)
+                Text(overwriteChoiceDetail)
+                    .font(DS.Fonts.label)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var overwriteChoiceDetail: String {
+        if plan.needsApproval.isEmpty {
+            if !blockedOverwrites.isEmpty {
+                return "本次有 \(blockedOverwrites.count) 条已关联笔记，但均无法完整覆盖更新，所以上方开关不可用。当前暂不支持图文覆盖；具体原因见下方，原笔记保持不变。"
+            }
+            return "本次没有可覆盖更新的已关联笔记；新笔记仍会新建，无法执行的条目仍会跳过。当前覆盖更新暂不支持图片、公式或图表。"
+        }
+        let blockedDetail = blockedOverwrites.isEmpty ? "" : "另有 \(blockedOverwrites.count) 条无法覆盖更新，开启后仍会跳过。"
+        return "默认关闭。开启后仅批准本次 \(plan.needsApproval.count) 条可更新笔记，点击「执行」后才会写入，也可逐条跳过。当前暂不支持图片、公式或图表。" + blockedDetail
+    }
+
     private var overwriteSection: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack(alignment: .top, spacing: DS.Space.s) {
@@ -1780,7 +1970,7 @@ private struct ImportApprovalSheet: View {
                     .font(.system(size: 13))
                     .foregroundStyle(DS.Status.warn)
                     .padding(.top, DS.Optical.hairline)
-                Text("以下 \(plan.needsApproval.count) 条已有笔记的正文会被替换，写掉就找不回来——请逐条确认。")
+                Text("以下是本次可覆盖更新的 \(plan.needsApproval.count) 条已有笔记；只有标记「将覆盖」的条目会执行，可以逐条跳过。")
                     .font(DS.Fonts.rowTitle)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -1823,7 +2013,7 @@ private struct ImportApprovalSheet: View {
 
                 VStack(alignment: .leading, spacing: DS.Space.xs) {
 
-                    Text("将写入的正文（小米侧的新版本）")
+                    Text("将写入的正文（本地当前版本）")
                         .font(DS.Fonts.caption)
                         .foregroundStyle(.secondary)
                     if change.preview.isEmpty {
@@ -1842,16 +2032,23 @@ private struct ImportApprovalSheet: View {
                 .background(DS.Palette.surfaceDeep, in: RoundedRectangle(cornerRadius: DS.Radius.s))
 
                 HStack(spacing: DS.Space.s) {
+                    Button("覆盖") {
+                        skipped.remove(change.id)
+                        approved.insert(change.id)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(isApproved)
+                    Button("跳过") {
+                        approved.remove(change.id)
+                        skipped.insert(change.id)
+                    }
+                    .controlSize(.small)
+                    .disabled(isSkipped)
                     if isApproved || isSkipped {
                         Button("撤销") { reset(change.id) }
                             .controlSize(.small)
                             .help("把这条改回「待确认」")
-                    } else {
-                        Button("覆盖") { approved.insert(change.id) }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                        Button("跳过") { skipped.insert(change.id) }
-                            .controlSize(.small)
                     }
                     Spacer(minLength: 0)
                 }
@@ -1862,7 +2059,7 @@ private struct ImportApprovalSheet: View {
     private var blockedCard: some View {
         DSCard(title: "这次无法执行的变更", icon: "nosign", tint: DS.Status.warn) {
             VStack(alignment: .leading, spacing: DS.Space.m) {
-                Text("下面 \(plan.blocked.count) 条不会被处理，也不会用别的方式做。每条的原因：")
+                Text("下面 \(plan.blocked.count) 条不能通过「执行」导入或覆盖；可改用「副本存入 Apple 备忘录」或「保存副本文件」。无法执行的原因：")
                     .font(DS.Fonts.label)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

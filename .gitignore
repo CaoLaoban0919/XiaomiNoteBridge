@@ -72,3 +72,6 @@ build/
 
 # 运行时凭据（应用写入 Application Support，此处为防御性忽略）
 credentials.json
+
+# 渲染/导入验证产物（可由 Tools/run-*.sh 重新生成）
+outputs/

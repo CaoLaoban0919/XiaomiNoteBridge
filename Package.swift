@@ -13,8 +13,9 @@ import PackageDescription
 //   会被当成应用源码一起编译，报出一片
 //   "statements are not allowed at the top level"。
 //
-//   下面把应用目标限定在 Sources/，并 exclude 掉 Tools/、Resources/、build/，
-//   Xcode 就知道那三个工具/资源不属于应用目标，不再误报。
+//   下面把应用源码限定在 Sources/，并 exclude 掉 Tools/、build/，
+//   Xcode 就不会把工具脚本当成应用源码，不再误报。
+//   KaTeX 作为资源单独复制，供 Xcode 直接运行这个 Swift Package 时离线渲染。
 //
 // 改动须知：**不要往这里搬构建逻辑**。它只是给 IDE 看的结构声明。
 let package = Package(
@@ -33,8 +34,14 @@ let package = Package(
         .executableTarget(
             name: "MiNoteBridge",
             path: ".",
-            exclude: ["Tools", "Resources", "build", ".build"],
+            exclude: [
+                "Tools", "build", ".build",
+                "Resources/Info.plist",
+                "Resources/首次使用许可.md",
+                "Resources/权限清单.md",
+            ],
             sources: ["Sources"],
+            resources: [.copy("Resources/katex")],
             linkerSettings: [
                 // AEDeterminePermissionToAutomateTarget 需要
                 .linkedFramework("Carbon"),

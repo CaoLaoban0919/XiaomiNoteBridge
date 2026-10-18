@@ -84,6 +84,7 @@ struct ImportProgress {
     var currentTitle: String?
     var completed = 0
     var total = 0
+    var detail: String?
 }
 
 protocol NoteCacheProtocol: AnyObject {
@@ -92,6 +93,7 @@ protocol NoteCacheProtocol: AnyObject {
     func saveIndex(notes: [CachedNote], folders: [CachedFolder]) throws
 
     func content(for noteId: String) -> CachedNoteContent?
+    func html(for noteId: String) -> String?
     func saveContent(_ content: CachedNoteContent, for noteId: String) throws
 
     func saveHTML(_ html: String, for noteId: String) throws
@@ -105,6 +107,10 @@ protocol NoteCacheProtocol: AnyObject {
     func imageData(fileId: String) -> Data?
 
     func clearAll() throws
+}
+
+extension NoteCacheProtocol {
+    func html(for noteId: String) -> String? { content(for: noteId)?.html }
 }
 
 @MainActor
