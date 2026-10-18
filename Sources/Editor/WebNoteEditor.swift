@@ -440,7 +440,10 @@ enum WebNoteHTMLBridge {
                     { left: '\\\\(', right: '\\\\)', display: false }
                 ],
                 throwOnError: false,
-                strict: false
+                strict: false,
+                // \text{中文} 默认会报错（KaTeX 按 XeTeX 行为处理非 ASCII）。
+                // 打开它，中文说明文字才能正常出现在公式里。
+                unicodeTextInMathMode: true
             });
             document.querySelectorAll('.katex').forEach(function(el) {
                 el.setAttribute('contenteditable', 'false');

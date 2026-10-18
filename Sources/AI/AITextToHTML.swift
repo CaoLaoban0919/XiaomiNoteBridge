@@ -231,32 +231,21 @@ enum AITextToHTML {
         return String(format: "%.1f%%", value)
     }
 
-    /// 轻量公式排版：把 LaTeX 的下标/上标/粗体转成 HTML 标签。
+    /// Swift 侧只做**结构**，不碰公式内容。
     ///
-    /// 不引 KaTeX：那要打包 300KB+ 的 JS/CSS/字体，而且正文是可编辑的——
-    /// 公式区块一旦被 execCommand 改写就会被破坏。
-    /// 这里只处理最常见的写法，覆盖 `∬_D`、`∫_α^β`、`r_{i}`、`**r**` 这类，
-    /// 视觉上足够，且不影响编辑。
+    /// 之前这里还把 `x^2` 转成 `x<sup>2</sup>`、`x_1` 转成 `x<sub>1</sub>`——
+    /// 那一步是这类 bug 的总根源：KaTeX 收到的是 HTML 而不是 LaTeX，
+    /// 结果要么渲染失败，要么被拆成几行。现在这类转换全部删掉，
+    /// 公式内容原样交给 KaTeX（社区做法：存源码，渲染时解释）。
     private static func typesetMath(_ text: String) -> String {
-        // **含 `$` 的段落一律原样返回（块级 `$$` 和行内 `$` 都算）。**
-        // 里面有真正的 LaTeX，交给 KaTeX 处理；一旦在这里把 `x^p` 改成
-        // `x<sup>p</sup>`、把 `x_1` 改成 `x<sub>1</sub>`，KaTeX 收到的就是
-        // 残缺 HTML——整条公式渲染失败，或者被拆成好几行。
+        // 含 `$` 的段落原样返回，只压平块级公式内部的物理换行
         if text.contains("$") {
-            // 块级公式内的裸换行压平成空格：KaTeX 只认 `\\` 作为换行，
-            // 一个物理换行会让它把一条公式切成几段。
             guard text.contains("$$") else { return text }
             return flattenInsideDisplayMath(text)
         }
 
-        // **裸 LaTeX 兜底。**
-        // AI 经常不写 `$`，直接甩 `\iint_D f(x,y)dxdy=...`。
-        // 只要整段带数学命令、又没有成片中文，就当块级公式包起来——
-        // 否则 KaTeX 看不见它，用户只能看到反斜杠源码。
+        // 裸 LaTeX 兜底：AI 经常不写 `$`，直接甩 `\iint_D f(x,y)dxdy=...`
         if looksLikeBareLaTeX(text) {
-            // **先把换行压平。**
-            // AI 常把一条公式折成多行（`\Rightarrow` 后面断行），
-            // 直接塞进 $$…$$ 会被 KaTeX 当成多段，渲染出来就是断开的几截。
             let flat = text
                 .components(separatedBy: .newlines)
                 .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -264,20 +253,8 @@ enum AITextToHTML {
             return "$$\(flat)$$"
         }
 
-        var result = text
-
-        // r_{i+1} / x_{max}：先处理带花括号的，否则会被单字符规则拆坏
-        result = replacing(#"_\{([^}]+)\}"#, with: "<sub>$1</sub>", in: result)
-        result = replacing(#"\^\{([^}]+)\}"#, with: "<sup>$1</sup>", in: result)
-
-        // ∫_α^β：下标和上标紧跟在积分号/字母后面
-        result = replacing(#"_([A-Za-z0-9α-ωΑ-Ω]+)"#, with: "<sub>$1</sub>", in: result)
-        result = replacing(#"\^([A-Za-z0-9α-ωΑ-Ω]+)"#, with: "<sup>$1</sup>", in: result)
-
-        // **r** → 粗体（Markdown 粗体在正文里原本也不渲染）
-        result = replacing(#"\*\*([^*]+)\*\*"#, with: "<strong>$1</strong>", in: result)
-
-        return result
+        // 只剩 Markdown 粗体这一件与公式无关的事
+        return replacing(#"\*\*([^*]+)\*\*"#, with: "<strong>$1</strong>", in: text)
     }
 
     private static func replacing(_ pattern: String, with template: String, in text: String) -> String {
