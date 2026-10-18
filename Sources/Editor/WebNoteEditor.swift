@@ -185,9 +185,23 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
         let prepared = WebNoteHTMLBridge.preparingImagesForDisplay(html, images: images)
         let document = WebNoteHTMLBridge.fullDocument(prepared, editable: editable)
         appliedHash = WebNoteEditor.contentHash(html: html, images: images)
-        // baseURL 指向 app 的 Resources：KaTeX 的 katex.min.css / .js / fonts
-        // 都放在那里，相对路径才能被 WebView 解析到。
-        webView?.loadHTMLString(document, baseURL: Bundle.main.resourceURL)
+        // **必须写成临时文件再用 loadFileURL 加载。**
+        // `loadHTMLString(_:baseURL:)` 虽然能给出 baseURL，但 WKWebView 不会
+        // 把 baseURL 当作"可读目录"授予权限——katex.min.js 之类的相对资源
+        // 会被安全策略静默拦掉，表现就是公式永远不渲染、`$$` 原样显示。
+        // loadFileURL 的 allowingReadAccessTo 才是真正放行读取的入口。
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("note-\(UUID().uuidString).html")
+        do {
+            try document.write(to: fileURL, atomically: true, encoding: .utf8)
+            webView?.loadFileURL(
+                fileURL,
+                allowingReadAccessTo: URL(fileURLWithPath: "/", isDirectory: true)
+            )
+        } catch {
+            // 写文件失败就退回老路径：公式可能不渲染，但正文不能空白
+            webView?.loadHTMLString(document, baseURL: Bundle.main.resourceURL)
+        }
     }
 
     func setEditable(_ editable: Bool) {
@@ -392,12 +406,16 @@ enum WebNoteHTMLBridge {
 
     static func fullDocument(_ body: String, editable: Bool) -> String {
         let editableAttr = editable ? "true" : "false"
+        // **KaTeX 用绝对 file:// 路径。**
+        // 正文 HTML 写在临时目录里，相对路径 `katex/...` 会指向临时目录而不是
+        // app 的 Resources——资源 404，公式就永远是 `$$` 源码。
+        let resources = Bundle.main.resourceURL?.absoluteString ?? ""
         return """
         <!doctype html><html><head><meta charset="utf-8">\
-        <link rel="stylesheet" href="katex/katex.min.css">\
+        <link rel="stylesheet" href="\(resources)katex/katex.min.css">\
         <style>\(documentCSS)</style>\
-        <script src="katex/katex.min.js"></script>\
-        <script src="katex/auto-render.min.js"></script>\
+        <script src="\(resources)katex/katex.min.js"></script>\
+        <script src="\(resources)katex/auto-render.min.js"></script>\
         </head>\
         <body contenteditable="\(editableAttr)">\(body)\
         <script>\(mathRenderJS)</script></body></html>

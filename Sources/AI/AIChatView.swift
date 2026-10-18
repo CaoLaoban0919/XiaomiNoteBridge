@@ -359,13 +359,14 @@ struct AIChatView: View {
                 }
             }
         } label: {
-            // 做成明确的按钮：描边 + 悬停高亮。纯图标会让人以为是状态指示，不是可点的。
+            // 圆形液态玻璃按钮：功能键和输入框在同一视觉层级，
+            // 纯色小圆点看起来像状态灯，不像能点的东西。
             Image(systemName: session.activeSkill.icon)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(DS.Palette.accent)
-                .frame(width: 28, height: 28)
-                .background(DS.Palette.surface, in: Circle())
-                .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 1))
+                .frame(width: 30, height: 30)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 0.8))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -396,11 +397,11 @@ struct AIChatView: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DS.Palette.accent)
-                    .frame(width: DS.Space.xl, height: DS.Space.xl)
-                    .background(DS.Palette.surface, in: Circle())
-                    .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 1))
+                    .frame(width: 30, height: 30)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 0.8))
 
                 if !session.pending.isEmpty {
                     Text("\(session.pending.count)")
