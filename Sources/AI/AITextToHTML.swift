@@ -19,7 +19,8 @@ enum AITextToHTML {
             paragraph = []
             guard !joined.isEmpty else { return }
             // 段内换行保留为 <br/>，空行才分段
-            let body = escape(joined).replacingOccurrences(of: "\n", with: "<br/>")
+            var body = escape(joined).replacingOccurrences(of: "\n", with: "<br/>")
+            body = typesetMath(body)
             out.append("<p>\(body)</p>")
         }
 
@@ -162,6 +163,35 @@ enum AITextToHTML {
             return "\(Int(value.rounded()))%"
         }
         return String(format: "%.1f%%", value)
+    }
+
+    /// 轻量公式排版：把 LaTeX 的下标/上标/粗体转成 HTML 标签。
+    ///
+    /// 不引 KaTeX：那要打包 300KB+ 的 JS/CSS/字体，而且正文是可编辑的——
+    /// 公式区块一旦被 execCommand 改写就会被破坏。
+    /// 这里只处理最常见的写法，覆盖 `∬_D`、`∫_α^β`、`r_{i}`、`**r**` 这类，
+    /// 视觉上足够，且不影响编辑。
+    private static func typesetMath(_ text: String) -> String {
+        var result = text
+
+        // r_{i+1} / x_{max}：先处理带花括号的，否则会被单字符规则拆坏
+        result = replacing(#"_\{([^}]+)\}"#, with: "<sub>$1</sub>", in: result)
+        result = replacing(#"\^\{([^}]+)\}"#, with: "<sup>$1</sup>", in: result)
+
+        // ∫_α^β：下标和上标紧跟在积分号/字母后面
+        result = replacing(#"_([A-Za-z0-9α-ωΑ-Ω]+)"#, with: "<sub>$1</sub>", in: result)
+        result = replacing(#"\^([A-Za-z0-9α-ωΑ-Ω]+)"#, with: "<sup>$1</sup>", in: result)
+
+        // **r** → 粗体（Markdown 粗体在正文里原本也不渲染）
+        result = replacing(#"\*\*([^*]+)\*\*"#, with: "<strong>$1</strong>", in: result)
+
+        return result
+    }
+
+    private static func replacing(_ pattern: String, with template: String, in text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: template)
     }
 
     /// 保留两位小数，避免 SVG 里出现超长浮点
