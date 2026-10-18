@@ -9,7 +9,7 @@ private enum SidebarSelection: Hashable {
     case trash
 }
 
-private let mainViewNoteCache = NoteCache()
+let mainViewNoteCache = NoteCache()
 
 struct MainView: View {
     @EnvironmentObject private var onboarding: OnboardingState
