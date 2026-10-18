@@ -33,6 +33,68 @@ enum AIMessage {
     case userWithImages(text: String, images: [AIImage])
 
     case assistant(String)
+
+    /// 模型决定调用工具：content 可能为空，真正的内容在 calls 里。
+    case assistantToolCalls(text: String?, calls: [AIToolCall])
+
+    /// 工具执行结果，按 id 回填给模型。
+    case toolResult(id: String, content: String)
+}
+
+/// 一次工具调用请求。
+struct AIToolCall {
+    var id: String
+    var name: String
+    /// 原始 JSON 字符串（OpenAI 把 arguments 作为字符串返回）
+    var arguments: String
+
+    /// 解析成字典；解析失败返回空字典，让工具自己报「参数缺失」。
+    var argumentObject: [String: Any] {
+        guard let data = arguments.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        return object
+    }
+}
+
+/// 把任意 JSON 值包成 Encodable，用于工具参数 schema。
+///
+/// 不用 `[String: Any]` 直接编码：`JSONEncoder` 不支持 `Any`，
+/// 而工具 schema 天然是嵌套字典 + 数组 + 基础类型。
+enum JSONValue: Encodable {
+    case string(String)
+    case number(Double)
+    case integer(Int)
+    case bool(Bool)
+    case array([JSONValue])
+    case object([String: JSONValue])
+    case null
+
+    init(_ any: Any) {
+        switch any {
+        case let value as String: self = .string(value)
+        case let value as Bool: self = .bool(value)
+        case let value as Int: self = .integer(value)
+        case let value as Double: self = .number(value)
+        case let value as [Any]: self = .array(value.map(JSONValue.init))
+        case let value as [String: Any]:
+            self = .object(value.mapValues(JSONValue.init))
+        default: self = .null
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .integer(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
 }
 
 struct AIImage {
@@ -49,6 +111,8 @@ struct AIImage {
 struct AICompletion {
     var text: String
     var model: String
+    /// 模型要求调用的工具。为空表示这是最终回答。
+    var toolCalls: [AIToolCall] = []
 }
 
 enum AIError: LocalizedError {
@@ -89,7 +153,7 @@ protocol AIProviderProtocol: AnyObject {
     var config: AIConfig { get }
     func update(_ config: AIConfig)
 
-    func complete(_ messages: [AIMessage]) async throws -> AICompletion
+    func complete(_ messages: [AIMessage], tools: [AITool]) async throws -> AICompletion
 
     func testConnection() async throws -> String
 

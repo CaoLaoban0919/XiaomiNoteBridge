@@ -64,7 +64,8 @@ final class NoteAI: ObservableObject, NoteAIProtocol {
                                      images: images,
                                      instruction: instruction)
 
-        let completion = try await provider.complete(messages)
+        // 重构走单轮：它要的是确定的 HTML 输出，不需要模型调工具
+        let completion = try await provider.complete(messages, tools: [])
         return parse(completion.text)
     }
 

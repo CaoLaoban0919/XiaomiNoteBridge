@@ -193,9 +193,37 @@ final class AIChatSession: ObservableObject {
         let index = messages.count - 1
 
         do {
-            let payload = buildMessages()
-            let completion = try await provider.complete(payload)
-            let text = completion.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            var payload = buildMessages()
+            let tools = AIToolRegistry.shared.tools
+            var rounds = 0
+            var finalText = ""
+
+            // 工具循环：模型要调工具 → 本地执行 → 结果回填 → 再问一次。
+            // 最多 6 轮：防止模型在两个工具之间来回打转，把一次对话烧成死循环。
+            while rounds < 6 {
+                rounds += 1
+                let completion = try await provider.complete(payload, tools: tools)
+
+                if completion.toolCalls.isEmpty {
+                    finalText = completion.text
+                    break
+                }
+
+                payload.append(.assistantToolCalls(
+                    text: completion.text.isEmpty ? nil : completion.text,
+                    calls: completion.toolCalls
+                ))
+
+                for call in completion.toolCalls {
+                    let result = await AIToolRegistry.shared.call(
+                        name: call.name,
+                        arguments: call.argumentObject
+                    )
+                    payload.append(.toolResult(id: call.id, content: result))
+                }
+            }
+
+            let text = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { throw AIError.emptyResponse }
             messages[index].text = text
             messages[index].state = .done

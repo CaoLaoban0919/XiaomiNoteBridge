@@ -133,7 +133,7 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         return url
     }
 
-    func complete(_ messages: [AIMessage]) async throws -> AICompletion {
+    func complete(_ messages: [AIMessage], tools: [AITool] = []) async throws -> AICompletion {
         let config = self.config
         guard config.isUsable else { throw AIError.notConfigured }
 
@@ -153,7 +153,9 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(
-            ChatRequest(model: model, messages: messages.map(WireMessage.init))
+            ChatRequest(model: model,
+                        messages: messages.map(WireMessage.init),
+                        tools: tools.isEmpty ? nil : tools.map(ToolWire.init))
         )
 
         let data: Data
@@ -181,6 +183,19 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
 
         let text = (decoded.choices?.first?.message?.content?.plainText ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 工具调用优先：模型这一轮可能只给了 tool_calls，content 是空的。
+        let calls = (decoded.choices?.first?.message?.toolCalls ?? []).compactMap { raw -> AIToolCall? in
+            guard let name = raw.function?.name, !name.isEmpty else { return nil }
+            return AIToolCall(id: raw.id ?? UUID().uuidString,
+                              name: name,
+                              arguments: raw.function?.arguments ?? "{}")
+        }
+
+        if !calls.isEmpty {
+            return AICompletion(text: text, model: decoded.model ?? model, toolCalls: calls)
+        }
+
         guard !text.isEmpty else { throw AIError.emptyResponse }
 
         return AICompletion(text: text, model: decoded.model ?? model)
@@ -262,11 +277,55 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
 private struct ChatRequest: Encodable {
     var model: String
     var messages: [WireMessage]
+    var tools: [ToolWire]?
+}
+
+/// 工具定义的线上格式（OpenAI function calling / MCP tools/list 同形）
+private struct ToolWire: Encodable {
+    var type: String = "function"
+    var function: Function
+
+    struct Function: Encodable {
+        var name: String
+        var description: String
+        var parameters: JSONValue
+    }
+
+    init(_ tool: AITool) {
+        function = Function(name: tool.name,
+                            description: tool.description,
+                            parameters: JSONValue(tool.parameters))
+    }
+}
+
+/// 模型发起的工具调用（请求里回传历史时用）
+private struct ToolCallWire: Encodable {
+    var id: String
+    var type: String = "function"
+    var function: Function
+
+    struct Function: Encodable {
+        var name: String
+        var arguments: String
+    }
+
+    init(_ call: AIToolCall) {
+        id = call.id
+        function = Function(name: call.name, arguments: call.arguments)
+    }
 }
 
 private struct WireMessage: Encodable {
     var role: String
     var content: WireContent
+    var toolCalls: [ToolCallWire]?
+    var toolCallID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case role, content
+        case toolCalls = "tool_calls"
+        case toolCallID = "tool_call_id"
+    }
 
     init(_ message: AIMessage) {
         switch message {
@@ -285,6 +344,14 @@ private struct WireMessage: Encodable {
             content = images.isEmpty
                 ? .plain(text)
                 : .blocks(WireContent.blocks(text: text, images: images))
+        case .assistantToolCalls(let text, let calls):
+            role = "assistant"
+            content = .plain(text ?? "")
+            toolCalls = calls.map(ToolCallWire.init)
+        case .toolResult(let id, let content):
+            role = "tool"
+            self.content = .plain(content)
+            toolCallID = id
         }
     }
 }
@@ -328,7 +395,22 @@ private enum WireContent: Encodable {
 private struct ChatResponse: Decodable {
     struct Choice: Decodable {
         struct Message: Decodable {
+            struct ToolCall: Decodable {
+                var id: String?
+                var function: Function?
+
+                struct Function: Decodable {
+                    var name: String?
+                    var arguments: String?
+                }
+            }
             var content: FlexibleContent?
+            var toolCalls: [ToolCall]?
+
+            enum CodingKeys: String, CodingKey {
+                case content
+                case toolCalls = "tool_calls"
+            }
         }
         var message: Message?
     }
