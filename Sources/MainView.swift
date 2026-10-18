@@ -806,24 +806,31 @@ struct MainView: View {
     /// 用户还没看清内容，远端那一份已经被改掉了，而且撤销也依赖再写一次。
     private func applyAIResult(_ text: String, to note: CachedNote) {
         // 走 AITextToHTML：它会把 ```chart 代码块转成内联 SVG。
-        // 之前直接把每段套 <p>，JSON 就原样显示在正文里了。
         // 这里不再过 NotesHTMLSanitizer——它不认识 <svg>，会把整张图删掉；
         // 而文本部分已由 AITextToHTML 自己转义过了。
-        let addition = AITextToHTML.render(text)
-        guard !addition.isEmpty else { return }
+        Task { @MainActor in
+            var addition = AITextToHTML.render(text)
 
-        let previous = noteHTML
-        // 追加而不是替换：原文一个字都不能动，AI 的内容接在后面
-        noteHTML = previous + addition
-        chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
+            // **块级公式转图片。**
+            // KaTeX 的 HTML 是一棵几十层 span 的树，导入 Apple Notes 时会被打散，
+            // 用户看到「σ∫α」这种残缺字符。PNG 作为附件进去，不会变形。
+            addition = await MathImageRenderer.replaceDisplayMath(in: addition)
 
-        // 复用编辑器既有的自动保存（600ms 防抖 → 写本地缓存）
-        scheduleBodySave(noteHTML, note: note)
+            guard !addition.isEmpty else { return }
 
-        showToast("已添加到正文末尾") { [previous] in
-            noteHTML = previous
+            let previous = noteHTML
+            // 追加而不是替换：原文一个字都不能动，AI 的内容接在后面
+            noteHTML = previous + addition
             chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
-            scheduleBodySave(previous, note: note)
+
+            // 复用编辑器既有的自动保存（600ms 防抖 → 写本地缓存）
+            scheduleBodySave(noteHTML, note: note)
+
+            showToast("已添加到正文末尾") { [previous] in
+                noteHTML = previous
+                chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
+                scheduleBodySave(previous, note: note)
+            }
         }
     }
 
