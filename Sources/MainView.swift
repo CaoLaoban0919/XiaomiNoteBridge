@@ -850,8 +850,6 @@ struct MainView: View {
             Divider().frame(height: 18)
 
             toolButton("photo.badge.plus", "插入图片") { editorCommand = .insertImage }
-            toolButton("arrow.triangle.2.circlepath", "替换选中的图片") { editorCommand = .replaceImage }
-            toolButton("trash", "删除选中的图片") { editorCommand = .deleteImage }
 
             Spacer(minLength: 0)
 

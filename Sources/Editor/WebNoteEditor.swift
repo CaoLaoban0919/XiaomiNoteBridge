@@ -21,10 +21,6 @@ enum NoteEditorCommand: Equatable {
     case redo
     /// 选一张本地图片插入到光标处
     case insertImage
-    /// 把当前选中的图片换成本地另一张
-    case replaceImage
-    /// 删除选中的图片
-    case deleteImage
 }
 
 // 笔记正文的 WebKit 就地编辑器：WKWebView + contenteditable。
@@ -191,6 +187,21 @@ struct WebNoteEditor: NSViewRepresentable {
                 } catch (e) {}
             }, 300);
         }, true);
+
+        // 点图片时把选区落到图片上。
+        // contenteditable 里点一下图片，WebKit 通常只把光标放在图片**旁边**，
+        // 不产生"选中"——于是按 Delete 删不掉，界面也判断不出选中了哪张图。
+        // 这里点中图片就强制 selectNode，用户就能直接按 Delete 删除。
+        document.addEventListener('click', function(e) {
+            var target = e.target;
+            if (target && target.nodeName === 'IMG') {
+                var range = document.createRange();
+                range.selectNode(target);
+                var sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+        }, true);
     })();
     """
 
@@ -293,37 +304,6 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
             }
             return
 
-        case .replaceImage:
-            // 同上：选文件必须异步
-            DispatchQueue.main.async { [weak self] in
-                guard let self, let webView = self.webView else { return }
-                self.replaceSelectedImage(into: webView)
-            }
-            return
-
-        case .deleteImage:
-            // 选中图片（或被它包住的文本节点）后删掉整个 `<img>`
-            webView.evaluateJavaScript("""
-            (function(){
-                var sel = window.getSelection();
-                if (!sel || sel.rangeCount === 0) return false;
-                var node = sel.anchorNode;
-                while (node && node.nodeName !== 'IMG') { node = node.parentNode; }
-                if (!node) return false;
-                node.remove();
-                return true;
-            })();
-            """) { result, _ in
-                // 没选中图片时给一声提示：否则用户看到的就是"按钮点了没反应"，
-                // 分不清是没选中还是功能坏了。
-                if let ok = result as? Bool, !ok { NSSound.beep() }
-            }
-            return
-
-        case .replaceImage:
-            replaceSelectedImage(into: webView)
-            return
-
         default:
             break
         }
@@ -424,21 +404,6 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
     }
 
     /// 把当前选中的图片换成另一张。
-    private func replaceSelectedImage(into webView: WKWebView) {
-        guard let data = pickImageData() else { return }
-        let base64 = data.base64EncodedString()
-        webView.evaluateJavaScript("""
-        (function(){
-            var sel = window.getSelection();
-            if (!sel || sel.rangeCount === 0) return;
-            var node = sel.anchorNode;
-            while (node && node.nodeName !== 'IMG') { node = node.parentNode; }
-            if (!node) return;
-            node.src = 'data:image/png;base64,\(base64)';
-        })();
-        """, completionHandler: nil)
-    }
-
     private func pickImageData() -> Data? {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.png, .jpeg, .heic, .gif, .webP]
