@@ -137,6 +137,8 @@ struct MainView: View {
     @State private var aiHeightOverride: CGFloat?
     /// 拖动开始时的基准高度（gesture 的 translation 是累计值，必须自己记起点）
     @State private var dragStartHeight: CGFloat?
+    /// 拖动起点的**全局** Y 坐标。不用 translation 是因为拖动条自身会移动。
+    @State private var dragStartLocation: CGFloat?
 
     /// 临时提示气泡（带撤销）。几秒后自动消失。
     @State private var toast: ToastState?
@@ -821,27 +823,48 @@ struct MainView: View {
     /// 想回到自动，双击分隔条即可（清掉 override）。
     private var aiResizeHandle: some View {
         ZStack {
-            // 可见的只是一条 3pt 细线，但命中区域放到 9pt：
-            // 3pt 的线用鼠标很难抓准，拖半天拖不动会让人以为功能坏了。
+            // 命中区 9pt：3pt 的线用鼠标抓不准，拖半天拖不动会让人以为功能坏了。
             Color.clear
-            Capsule()
-                .fill(DS.Palette.stroke)
-                .frame(width: 40, height: 3)
+
+            // 边界是一条悬浮的液态玻璃条：它压在笔记与 AI 的交界上，
+            // 上下两块内容在它下面被折射/模糊，视觉上像一层真的玻璃隔开。
+            if #available(macOS 26.0, *) {
+                Capsule()
+                    .frame(width: 64, height: 6)
+                    .glassEffect(.regular, in: Capsule())
+            } else {
+                Capsule()
+                    .fill(DS.Palette.stroke)
+                    .frame(width: 40, height: 3)
+            }
         }
         .frame(height: 9)
         .contentShape(Rectangle())
         .onHover { inside in
-            if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+            // 用 set 而不是 push/pop：push/pop 是全局栈，视图消失时容易漏 pop，
+            // 光标会卡在 resizeUpDown 上再也回不来。
+            if inside { NSCursor.resizeUpDown.set() } else { NSCursor.arrow.set() }
         }
         .gesture(
-            DragGesture(minimumDistance: 0)
+            // **坐标空间必须是 .global。**
+            // 默认的 .local 以拖动条自身为参照，而拖动条会跟着 AI 区一起上下移动：
+            // 手势每帧都以为指针"跑了"，高度被反复回弹——就是看到的抖动。
+            // 全局坐标下，起点与当前位置都与视图位置无关。
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { value in
-                    if dragStartHeight == nil { dragStartHeight = aiPanelHeight }
-                    let start = dragStartHeight ?? aiPanelHeight
-                    // 向上拖 translation 为负 → AI 区变高
-                    aiHeightOverride = max(120, start - value.translation.height)
+                    if dragStartHeight == nil {
+                        dragStartHeight = aiPanelHeight
+                        dragStartLocation = value.startLocation.y
+                    }
+                    let startY = dragStartLocation ?? value.startLocation.y
+                    // 指针向上 → delta 为负 → AI 区变高
+                    let delta = value.location.y - startY
+                    aiHeightOverride = max(120, (dragStartHeight ?? aiPanelHeight) - delta)
                 }
-                .onEnded { _ in dragStartHeight = nil }
+                .onEnded { _ in
+                    dragStartHeight = nil
+                    dragStartLocation = nil
+                }
         )
         .onTapGesture(count: 2) {
             // 双击恢复自动高度：用户调乱之后需要一个不费脑的回头路
