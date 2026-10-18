@@ -120,6 +120,9 @@ final class AIChatSession: ObservableObject {
     @Published var pending: [ChatAttachment] = []
     @Published var isSending: Bool = false
 
+    /// 当前技能：切换它会换掉 system prompt 里的行为规范。
+    @Published var activeSkill: AISkill = AISkill.all[0]
+
     var noteContext: NoteContext?
 
     struct NoteContext {
@@ -202,7 +205,21 @@ final class AIChatSession: ObservableObject {
             // 最多 6 轮：防止模型在两个工具之间来回打转，把一次对话烧成死循环。
             while rounds < 6 {
                 rounds += 1
-                let completion = try await provider.complete(payload, tools: tools)
+                let completion: AICompletion
+                do {
+                    completion = try await provider.complete(payload, tools: tools)
+                } catch let error as AIError {
+                    // **模型不支持 tools 时降级成纯对话。**
+                    // 报错形如 400 + "tools is not supported"，换模型的人不该因此
+                    // 连普通问答都用不了。降级后这一轮就不再尝试工具了。
+                    if case .http(let code, let body) = error,
+                       code == 400,
+                       body.lowercased().contains("tool") {
+                        completion = try await provider.complete(payload, tools: [])
+                    } else {
+                        throw error
+                    }
+                }
 
                 if completion.toolCalls.isEmpty {
                     finalText = completion.text
@@ -234,7 +251,7 @@ final class AIChatSession: ObservableObject {
     }
 
     private func buildMessages() -> [AIMessage] {
-        var out: [AIMessage] = [.system(Self.systemPrompt)]
+        var out: [AIMessage] = [.system(Self.systemPrompt + "\n\n" + activeSkill.instructions)]
 
         if let context = noteContext {
             out.append(.system("""

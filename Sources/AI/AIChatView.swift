@@ -334,10 +334,40 @@ struct AIChatView: View {
 
         HStack(alignment: .bottom, spacing: DS.Space.s) {
             attachMenu
+            skillMenu
             draftField
             sendButton
         }
         .padding(DS.Space.l)
+    }
+
+    /// 技能选择：切换会换掉 system prompt 里的行为规范（重构/总结/答疑/对话）。
+    private var skillMenu: some View {
+        Menu {
+            ForEach(AISkill.all) { skill in
+                Button {
+                    session.activeSkill = skill
+                } label: {
+                    Label {
+                        VStack(alignment: .leading) {
+                            Text(skill.name)
+                            Text(skill.summary).font(.caption)
+                        }
+                    } icon: {
+                        Image(systemName: skill.icon)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: session.activeSkill.icon)
+                .font(.system(size: 13))
+                .frame(width: 28, height: 28)
+                .background(DS.Palette.nest, in: Circle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("\(session.activeSkill.name)：\(session.activeSkill.summary)")
     }
 
     private var attachMenu: some View {
