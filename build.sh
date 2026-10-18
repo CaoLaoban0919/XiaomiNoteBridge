@@ -77,13 +77,29 @@ codesign --verify --verbose=1 "$APP" 2>&1 | sed 's/^/    /'
 
 if [ "$ACTION" = "dmg" ]; then
   echo "==> 打包 dmg"
-  STAGE="$BUILD_DIR/dmg-stage"
-  rm -rf "$STAGE"; mkdir -p "$STAGE"
-  cp -R "$APP" "$STAGE/"
-  ln -sf /Applications "$STAGE/Applications"
   DMG="$BUILD_DIR/${APP_NAME}-${VERSION}.dmg"
   rm -f "$DMG"
-  hdiutil create -volname "$DISPLAY_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+
+  # 优先用 dmgbuild：它能直接写 .DS_Store，做出「左 App、右 Applications」的标准布局。
+  # 不用 Finder 脚本是因为从命令行控制 Finder 需要系统自动化授权，
+  # 脚本里拿不到（-10004 权限违例），只能失败。
+  DMGBUILD="/Users/tang/.workbuddy/binaries/python/envs/default/bin/dmgbuild"
+  if [ -x "$DMGBUILD" ] && [ -f "$PROJECT_DIR/Tools/dmg_settings.py" ]; then
+    "$DMGBUILD" -s "$PROJECT_DIR/Tools/dmg_settings.py" "$DISPLAY_NAME" "$DMG" >/dev/null 2>&1 \
+      && echo "    布局：dmgbuild（标准拖放）"
+  fi
+
+  # 降级：没有 dmgbuild 时用 hdiutil，功能可用但没有图标布局
+  if [ ! -f "$DMG" ]; then
+    STAGE="$BUILD_DIR/dmg-stage"
+    rm -rf "$STAGE"; mkdir -p "$STAGE"
+    cp -R "$APP" "$STAGE/"
+    ln -sf /Applications "$STAGE/Applications"
+    hdiutil create -volname "$DISPLAY_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+    rm -rf "$STAGE"
+    echo "    布局：hdiutil（无图标定位）"
+  fi
+
   echo "    产物：$DMG"
 fi
 
