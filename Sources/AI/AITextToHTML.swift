@@ -73,68 +73,95 @@ enum AITextToHTML {
 
     // MARK: - SVG
 
+    /// 低饱和、同一明度带的配色：彼此不抢，缩到 80pt 也不糊成一团。
+    /// 刻意避开纯红/纯绿——那种配色在小尺寸下像报警灯。
     private static let palette = [
-        "#4A90D9", "#E8724C", "#5BB98C", "#B07CD9",
-        "#E0B44A", "#7A8FA6", "#D96B8A", "#67B7C9",
+        "#5B8FF9", "#61DDAA", "#65789B", "#F6BD16",
+        "#7262FD", "#78D3F8", "#9661BC", "#F6903D",
     ]
 
     private static func svg(_ payload: ChatChartPayload) -> String {
         let total = payload.data.reduce(0) { $0 + $1.value }
         guard total > 0 else { return "" }
 
-        let width = 560.0
-        let height = 240.0
+        let width = 640.0
+        let height = 260.0
         let center = height / 2
-        let radius = 92.0
+        let outer = 96.0
+        let inner = outer * 0.62          // 环宽 = 38% 半径，比 45% 更轻
+        let gap = 0.9                     // 扇区间隙（度），代替白色描边
         let title = escape(payload.title ?? "")
 
         var parts: [String] = []
-        parts.append("<div style=\"margin:10px 0;\">")
+        parts.append("<div style=\"margin:14px 0;\">")
         if !title.isEmpty {
-            parts.append("<div style=\"font-weight:600;font-size:14px;margin-bottom:6px;\">\(title)</div>")
+            parts.append("<div style=\"font-weight:600;font-size:15px;letter-spacing:.2px;margin-bottom:8px;color:currentColor;\">\(title)</div>")
         }
-        parts.append("<svg width=\"\(Int(width))\" height=\"\(Int(height))\" viewBox=\"0 0 \(Int(width)) \(Int(height))\" xmlns=\"http://www.w3.org/2000/svg\">")
+        parts.append("<svg width=\"\(Int(width))\" height=\"\(Int(height))\" viewBox=\"0 0 \(Int(width)) \(Int(height))\" xmlns=\"http://www.w3.org/2000/svg\" style=\"overflow:visible\">")
 
+        // 扇环：一条 path 同时描外弧+内弧（fill-rule=evenodd），不再用白色圆挖洞——
+        // 白圆在深色背景下就是一块突兀的白斑。
         var angle = -90.0
         for (index, item) in payload.data.enumerated() {
             let sweep = item.value / total * 360
             guard sweep > 0 else { continue }
-            let start = angle
-            let end = angle + sweep
-            parts.append("<path d=\"\(slice(center: center, radius: radius, start: start, end: end))\" fill=\"\(palette[index % palette.count])\" stroke=\"white\" stroke-width=\"1\"/>")
-            angle = end
+            let start = angle + gap / 2
+            let end = angle + sweep - gap / 2
+            guard end > start else { continue }
+            let d = ring(center: center, outer: outer, inner: inner, start: start, end: end)
+            parts.append("<path d=\"\(d)\" fill=\"\(palette[index % palette.count])\" fill-rule=\"evenodd\" stroke=\"none\"/>")
+            angle += sweep
         }
 
-        // 环形镂空 + 中心总量
-        // 文字用 currentColor：它继承正文的 color，深色模式下正文是浅色，
-        // 图表文字跟着变浅。写死 #333 会在深色底上直接消失。
-        parts.append("<circle cx=\"\(center)\" cy=\"\(center)\" r=\"\(radius * 0.55)\" fill=\"white\"/>")
-        parts.append("<text x=\"\(center)\" y=\"\(center + 5)\" text-anchor=\"middle\" font-size=\"14\" font-weight=\"600\" fill=\"currentColor\">\(Int(total.rounded()))</text>")
+        // 中心：总量 + 单位
+        parts.append("<text x=\"\(center)\" y=\"\(center - 2)\" text-anchor=\"middle\" font-size=\"22\" font-weight=\"600\" fill=\"currentColor\" style=\"font-variant-numeric:tabular-nums\">\(Int(total.rounded()))</text>")
+        if let unit = payload.unit, !unit.isEmpty {
+            parts.append("<text x=\"\(center)\" y=\"\(center + 16)\" text-anchor=\"middle\" font-size=\"10\" fill=\"currentColor\" opacity=\"0.45\">\(escape(unit))</text>")
+        }
 
-        // 右侧图例
-        var legendY = 46.0
+        // 右侧图例：圆点 + 名称 + 右对齐百分比（等宽数字，避免抖动）
+        var legendY = 56.0
         for (index, item) in payload.data.enumerated() {
             let color = palette[index % palette.count]
             let percent = item.value / total * 100
-            parts.append("<rect x=\"300\" y=\"\(legendY - 9)\" width=\"10\" height=\"10\" rx=\"2\" fill=\"\(color)\"/>")
-            parts.append("<text x=\"318\" y=\"\(legendY)\" font-size=\"12\" fill=\"currentColor\">\(escape(item.label))</text>")
-            parts.append("<text x=\"470\" y=\"\(legendY)\" font-size=\"12\" fill=\"currentColor\" opacity=\"0.6\" text-anchor=\"end\">\(Int(percent.rounded()))%</text>")
-            legendY += 22
+            parts.append("<circle cx=\"318\" cy=\"\(legendY - 4)\" r=\"4\" fill=\"\(color)\"/>")
+            parts.append("<text x=\"332\" y=\"\(legendY)\" font-size=\"12.5\" fill=\"currentColor\">\(escape(item.label))</text>")
+            parts.append("<text x=\"566\" y=\"\(legendY)\" font-size=\"12.5\" fill=\"currentColor\" opacity=\"0.55\" text-anchor=\"end\" style=\"font-variant-numeric:tabular-nums\">\(percentText(percent))</text>")
+            legendY += 24
         }
 
         parts.append("</svg></div>")
         return parts.joined()
     }
 
-    private static func slice(center: Double, radius: Double, start: Double, end: Double) -> String {
+    /// 扇环路径：外弧顺时针 + 内弧逆时针，配 fill-rule=evenodd 就是真正的环。
+    private static func ring(center: Double, outer: Double, inner: Double,
+                             start: Double, end: Double) -> String {
         let s = start * .pi / 180
         let e = end * .pi / 180
-        let x1 = center + radius * cos(s)
-        let y1 = center + radius * sin(s)
-        let x2 = center + radius * cos(e)
-        let y2 = center + radius * sin(e)
         let large = (end - start) > 180 ? 1 : 0
-        return "M \(f(center)) \(f(center)) L \(f(x1)) \(f(y1)) A \(f(radius)) \(f(radius)) 0 \(large) 1 \(f(x2)) \(f(y2)) Z"
+
+        let ox1 = center + outer * cos(s)
+        let oy1 = center + outer * sin(s)
+        let ox2 = center + outer * cos(e)
+        let oy2 = center + outer * sin(e)
+        let ix2 = center + inner * cos(e)
+        let iy2 = center + inner * sin(e)
+        let ix1 = center + inner * cos(s)
+        let iy1 = center + inner * sin(s)
+
+        return "M \(f(ox1)) \(f(oy1)) "
+            + "A \(f(outer)) \(f(outer)) 0 \(large) 1 \(f(ox2)) \(f(oy2)) "
+            + "L \(f(ix2)) \(f(iy2)) "
+            + "A \(f(inner)) \(f(inner)) 0 \(large) 0 \(f(ix1)) \(f(iy1)) Z"
+    }
+
+    /// 一位小数只在必要时出现：12% 比 12.0% 干净，6.7% 又比 7% 诚实。
+    private static func percentText(_ value: Double) -> String {
+        if value >= 10 || value.rounded() == value {
+            return "\(Int(value.rounded()))%"
+        }
+        return String(format: "%.1f%%", value)
     }
 
     /// 保留两位小数，避免 SVG 里出现超长浮点
