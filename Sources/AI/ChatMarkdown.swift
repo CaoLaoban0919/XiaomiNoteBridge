@@ -155,10 +155,96 @@ struct ChatMarkdown: View {
     }
 
     private func inline(_ s: String) -> AttributedString {
-        (try? AttributedString(
-            markdown: s,
+        let prepared = Self.prettifyMath(s)
+        return (try? AttributedString(
+            markdown: prepared,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        )) ?? AttributedString(s)
+        )) ?? AttributedString(prepared)
+    }
+
+    /// 把 LaTeX 压成纯文本符号。
+    ///
+    /// 对话气泡是 SwiftUI 文本，跑不了 KaTeX（正文有 WebView 才行）。
+    /// 与其让用户看 `\Rightarrow` 这种源码，不如换成 ⇒、ξ、≡ 这些真符号，
+    /// 分数则退化成 `a/b`。可读性优先，精确排版留给正文。
+    static func prettifyMath(_ text: String) -> String {
+        guard text.contains("$") || text.contains("\\") else { return text }
+
+        var s = text
+            .replacingOccurrences(of: "$$", with: "")
+            .replacingOccurrences(of: "$", with: "")
+
+        // 先把 \dfrac{a}{b} / \frac{a}{b} 化成 (a)/(b)，否则后面去掉反斜杠会剩一堆花括号
+        s = replaceFractions(s)
+
+        let symbols: [(String, String)] = [
+            ("\\Longrightarrow", "⟹"), ("\\Rightarrow", "⇒"), ("\\Leftarrow", "⇐"),
+            ("\\Leftrightarrow", "⇔"), ("\\rightarrow", "→"), ("\\to", "→"),
+            ("\\equiv", "≡"), ("\\approx", "≈"), ("\\neq", "≠"), ("\\ne", "≠"),
+            ("\\leq", "≤"), ("\\le", "≤"), ("\\geq", "≥"), ("\\ge", "≥"),
+            ("\\pm", "±"), ("\\times", "×"), ("\\cdot", "·"), ("\\div", "÷"),
+            ("\\infty", "∞"), ("\\partial", "∂"), ("\\nabla", "∇"),
+            ("\\exists", "∃"), ("\\forall", "∀"), ("\\in", "∈"),
+            ("\\alpha", "α"), ("\\beta", "β"), ("\\gamma", "γ"), ("\\delta", "δ"),
+            ("\\theta", "θ"), ("\\lambda", "λ"), ("\\mu", "μ"), ("\\pi", "π"),
+            ("\\sigma", "σ"), ("\\phi", "φ"), ("\\omega", "ω"), ("\\xi", "ξ"),
+            ("\\lim", "lim"), ("\\ln", "ln"), ("\\log", "log"), ("\\exp", "exp"),
+            ("\\int", "∫"), ("\\iint", "∬"), ("\\sum", "∑"), ("\\prod", "∏"),
+            ("\\sqrt", "√"), ("\\dots", "…"), ("\\ldots", "…"), ("\\quad", "  "),
+            ("\\,", ""), ("\\;", ""), ("\\!", ""),
+        ]
+        for (latex, symbol) in symbols {
+            s = s.replacingOccurrences(of: latex, with: symbol)
+        }
+
+        // 剩下没映射的命令去掉反斜杠，至少不显示来源码
+        s = s.replacingOccurrences(of: "\\", with: "")
+        // 残留的花括号在纯文本里没有意义
+        s = s.replacingOccurrences(of: "{", with: "")
+            .replacingOccurrences(of: "}", with: "")
+        return s
+    }
+
+    /// \frac{a}{b} / \dfrac{a}{b} → (a)/(b)
+    private static func replaceFractions(_ text: String) -> String {
+        var result = text
+        for command in ["\\dfrac", "\\tfrac", "\\frac"] {
+            while let range = result.range(of: command) {
+                let rest = result[range.upperBound...]
+                guard let numerator = braced(rest) else { break }
+                let afterNum = rest.dropFirst(numerator.raw.count)
+                guard let denominator = braced(afterNum) else { break }
+
+                let replacement = "\(numerator.value)/\(denominator.value)"
+                let end = afterNum.index(afterNum.startIndex, offsetBy: denominator.raw.count)
+                result.replaceSubrange(range.lowerBound..<end, with: replacement)
+            }
+        }
+        return result
+    }
+
+    /// 读取紧邻的一个 `{...}`，返回内容与原始片段。
+    private static func braced(_ text: Substring) -> (value: String, raw: String)? {
+        guard text.first == "{" else { return nil }
+        var depth = 0
+        var index = text.startIndex
+        var value = ""
+        while index < text.endIndex {
+            let ch = text[index]
+            if ch == "{" {
+                depth += 1
+                if depth == 1 { index = text.index(after: index); continue }
+            } else if ch == "}" {
+                depth -= 1
+                if depth == 0 {
+                    let end = text.index(after: index)
+                    return (value, String(text[text.startIndex..<end]))
+                }
+            }
+            if depth >= 1 { value.append(ch) }
+            index = text.index(after: index)
+        }
+        return nil
     }
 
     private static func headingLevel(_ line: String) -> Int? {
