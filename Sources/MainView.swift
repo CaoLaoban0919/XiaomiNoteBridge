@@ -795,6 +795,11 @@ struct MainView: View {
         Task { @MainActor in await persistBody(html, note: note) }
     }
 
+    /// AI 对话的产出 → **追加到当前正文末尾**，只写本地缓存。
+    ///
+    /// 不直接写「备忘录」：AI 给的是素材，最终要不要落到云端由用户在编辑器里决定。
+    /// 之前的实现直接 `setBody`，等于每聊一句就覆盖一遍云端正文——
+    /// 用户还没看清内容，远端那一份已经被改掉了，而且撤销也依赖再写一次。
     private func applyAIResult(_ text: String, to note: CachedNote) {
         let paragraphs = text
             .components(separatedBy: "\n\n")
@@ -803,34 +808,21 @@ struct MainView: View {
             .map { "<p>" + $0.replacingOccurrences(of: "\n", with: "<br/>") + "</p>" }
 
         guard !paragraphs.isEmpty else { return }
-        let html = NotesHTMLSanitizer.sanitize(paragraphs.joined())
+        let addition = NotesHTMLSanitizer.sanitize(paragraphs.joined())
+        guard !addition.isEmpty else { return }
 
         let previous = noteHTML
+        // 追加而不是替换：原文一个字都不能动，AI 的内容接在后面
+        noteHTML = previous + addition
+        chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
 
-        Task {
-            do {
-                try await noteAI.applyResult(
-                    NoteAIResult(html: html, summary: "由对话写入"),
-                    toNoteId: note.id
-                )
+        // 复用编辑器既有的自动保存（600ms 防抖 → 写本地缓存）
+        scheduleBodySave(noteHTML, note: note)
 
-                loadBody(note)
-                chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
-
-                showToast("已写入这条笔记") { [previous] in
-
-                    Task {
-                        try? await noteAI.applyResult(
-                            NoteAIResult(html: previous, summary: "撤销写入"),
-                            toNoteId: note.id
-                        )
-                        loadBody(note)
-                        chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
-                    }
-                }
-            } catch {
-                showError("写入笔记失败", error.localizedDescription)
-            }
+        showToast("已添加到正文末尾") { [previous] in
+            noteHTML = previous
+            chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
+            scheduleBodySave(previous, note: note)
         }
     }
 
