@@ -110,7 +110,9 @@ struct ChatMarkdown: View {
             }
             if inCode { codeLines.append(raw); continue }
 
-            if trimmed.hasPrefix("|"), trimmed.filter({ $0 == "|" }).count >= 2 {
+            // 表格行：允许 `|` 和转义后的 `\|` 开头
+            if (trimmed.hasPrefix("|") || trimmed.hasPrefix("\\|")),
+               trimmed.filter({ $0 == "|" }).count >= 2 {
                 flushParagraph()
                 tableRows.append(trimmed)
                 continue
@@ -274,11 +276,18 @@ struct ChatMarkdown: View {
     }
 
     private static func splitRow(_ line: String) -> [String] {
-        var s = line
+        // **先保护转义的竖线 `\|`。**
+        // AI 在表格里写公式时常给 `\|`，不处理的话它会被当成分隔符，
+        // 一行被切成三截，整张表结构就散了。
+        let placeholder = "\u{0001}"
+        var s = line.replacingOccurrences(of: "\\|", with: placeholder)
         if s.hasPrefix("|") { s.removeFirst() }
         if s.hasSuffix("|") { s.removeLast() }
         return s.split(separator: "|", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .map {
+                $0.trimmingCharacters(in: .whitespaces)
+                    .replacingOccurrences(of: placeholder, with: "|")
+            }
     }
 
     var body: some View {
@@ -351,7 +360,9 @@ struct ChatMarkdown: View {
         Grid(alignment: .leading, horizontalSpacing: DS.Space.m, verticalSpacing: DS.Optical.snug) {
             GridRow {
                 ForEach(Array(header.enumerated()), id: \.offset) { _, cell in
-                    Text(cell)
+                    // 表格单元格也要过符号化：AI 在表里写 `$F(x)\Rightarrow…$` 时，
+                    // 不走这一步就会把 LaTeX 源码原样显示出来。
+                    Text(Self.prettifyMath(cell))
                         .font(.system(size: bodySize - 1, weight: .semibold))
                         .textSelection(.enabled)
                 }
@@ -362,7 +373,7 @@ struct ChatMarkdown: View {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 GridRow {
                     ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                        Text(cell)
+                        Text(Self.prettifyMath(cell))
                             .font(.system(size: bodySize - 1))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
