@@ -11,6 +11,21 @@ struct AIChatView: View {
     /// 附件选择弹层
     @State private var showingAttachPicker = false
 
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// 功能键的底色/描边。
+    ///
+    /// 不能直接用 `Color.primary.opacity()`：浅色模式下 primary 是黑色，
+    /// 同一个透明度只会让按钮**变暗**，和"提亮"的意图正好相反。
+    /// 所以两个模式分开给：深色用白雾，浅色只用很淡的黑。
+    private var keyFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.055)
+    }
+
+    private var keyStroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.30) : Color.black.opacity(0.12)
+    }
+
     var onApply: ((String) -> Void)?
 
     private static let examples = [
@@ -358,8 +373,8 @@ struct AIChatView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DS.Palette.accent)
                 .frame(width: 32, height: 32)
-                .background(Color.primary.opacity(0.16), in: Circle())
-                .overlay(Circle().stroke(Color.primary.opacity(0.30), lineWidth: 0.8))
+                .background(keyFill, in: Circle())
+                .overlay(Circle().stroke(keyStroke, lineWidth: 0.8))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -411,8 +426,8 @@ struct AIChatView: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(DS.Palette.accent)
                     .frame(width: 32, height: 32)
-                    .background(Color.primary.opacity(0.16), in: Circle())
-                    .overlay(Circle().stroke(Color.primary.opacity(0.30), lineWidth: 0.8))
+                    .background(keyFill, in: Circle())
+                    .overlay(Circle().stroke(keyStroke, lineWidth: 0.8))
                     .contentShape(Circle())
 
                 if !session.pending.isEmpty {
