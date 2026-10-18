@@ -69,6 +69,22 @@ struct MainView: View {
     @State private var showingSettings = false
     /// 把当前笔记移到回收站（可撤销，列表级）
     @State private var confirmingMoveToTrash = false
+
+    /// 统一的错误弹窗。
+    ///
+    /// 所有失败都走这里：控制台日志用户看不见，toast 又会自己消失——
+    /// 报错必须停在屏幕上，让用户点一下「知道了」才关，否则等于没说。
+    @State private var errorAlert: ErrorAlertState?
+
+    private struct ErrorAlertState: Identifiable {
+        let id = UUID()
+        var title: String
+        var message: String
+    }
+
+    private func showError(_ title: String, _ message: String) {
+        errorAlert = ErrorAlertState(title: title, message: message)
+    }
     @State private var automation: AutomationStatus = .notDetermined
     @State private var checking = true
 
@@ -777,6 +793,11 @@ struct MainView: View {
         } message: {
             Text("它会从所有文件夹中消失，但仍能在回收站里找到并恢复。")
         }
+        .alert(item: $errorAlert) { alert in
+            Alert(title: Text(alert.title),
+                  message: Text(alert.message),
+                  dismissButton: .default(Text("知道了")))
+        }
         // 底部居中的临时提示：写入、自动保存、撤销这类"刚发生"的反馈放这里，
         // 不打断操作，也不占用正文位置。
         .overlay(alignment: .bottom) { toastOverlay }
@@ -932,10 +953,9 @@ struct MainView: View {
             persistedHTML = html
             announceAutoSave()
         } catch {
-            showToast("自动保存失败：\(error.localizedDescription)",
-                      icon: "exclamationmark.triangle.fill",
-                      tint: DS.Status.bad,
-                      duration: 6)
+            // 自动保存失败会直接丢用户刚敲的内容，必须弹窗拦住——
+            // 气泡会自己消失，用户看不到就继续写，下一次保存把失败的那次盖掉了。
+            showError("自动保存失败", error.localizedDescription)
         }
     }
 
@@ -1020,7 +1040,7 @@ struct MainView: View {
                     }
                 }
             } catch {
-                showToast("写入失败：\(error.localizedDescription)")
+                showError("写入笔记失败", error.localizedDescription)
             }
         }
     }
@@ -1096,6 +1116,8 @@ struct MainView: View {
             // hasBody 为真却没有正文文件 = 索引与缓存文件对不上（正常不该发生）。
             if note.hasBody {
                 noteBodyError = "本地缓存里找不到这条笔记的正文。可以点一次「拉取」重新下载。"
+                // 内联占位只覆盖正文区；弹窗保证用户一定能看到
+                showError("没有正文可显示", noteBodyError ?? "")
             }
             persistedHTML = ""
             return
@@ -1262,9 +1284,7 @@ struct MainView: View {
                     }
                 }
             } catch {
-                showToast("恢复失败：\(error.localizedDescription)",
-                          icon: "exclamationmark.triangle.fill",
-                          tint: DS.Status.bad)
+                showError("恢复原文失败", error.localizedDescription)
             }
         }
     }
