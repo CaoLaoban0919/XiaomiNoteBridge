@@ -283,7 +283,22 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
 
         switch command {
         case .insertImage:
-            insertImage(into: webView)
+            // **不能在 updateNSView 里同步弹 NSOpenPanel。**
+            // `runModal()` 会跑一个模态 runloop，而此刻 SwiftUI 正在更新视图：
+            // 轻则这次点击没反应，重则整排按钮从此点不动（第一响应者被模态循环搅乱）。
+            // 挪到下一个 runloop，等这轮更新彻底结束再弹。
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let webView = self.webView else { return }
+                self.insertImage(into: webView)
+            }
+            return
+
+        case .replaceImage:
+            // 同上：选文件必须异步
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let webView = self.webView else { return }
+                self.replaceSelectedImage(into: webView)
+            }
             return
 
         case .deleteImage:
@@ -291,12 +306,18 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
             webView.evaluateJavaScript("""
             (function(){
                 var sel = window.getSelection();
-                if (!sel || sel.rangeCount === 0) return;
+                if (!sel || sel.rangeCount === 0) return false;
                 var node = sel.anchorNode;
                 while (node && node.nodeName !== 'IMG') { node = node.parentNode; }
-                if (node) node.remove();
+                if (!node) return false;
+                node.remove();
+                return true;
             })();
-            """, completionHandler: nil)
+            """) { result, _ in
+                // 没选中图片时给一声提示：否则用户看到的就是"按钮点了没反应"，
+                // 分不清是没选中还是功能坏了。
+                if let ok = result as? Bool, !ok { NSSound.beep() }
+            }
             return
 
         case .replaceImage:
