@@ -612,7 +612,10 @@ struct MainView: View {
                     Button(role: .destructive) {
                         trashSelection()
                     } label: {
+                        // role 只影响部分系统按钮，这里显式给红：
+                        // 删除是唯一会改变列表可见性的操作，必须一眼能认出来
                         Text("删除（\(importSelection.count)）")
+                            .foregroundStyle(.red)
                     }
                     .controlSize(.small)
                     .help("移到回收站，不会删除笔记内容")
@@ -723,6 +726,9 @@ struct MainView: View {
                         }
                         .buttonStyle(.borderless)
                         .controlSize(.small)
+                        // 文件夹里是「删除」，用红色标出来；
+                        // 回收站里是「恢复」，中性色——恢复不该显得危险。
+                        .foregroundStyle(showingTrash ? Color.primary : Color.red)
                         .help(showingTrash ? "恢复到原来的文件夹" : "移到回收站")
                     }
 
