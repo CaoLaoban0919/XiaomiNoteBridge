@@ -366,8 +366,8 @@ struct AIChatView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DS.Palette.accent)
                 .frame(width: 32, height: 32)
-                .background(Color.primary.opacity(0.09), in: Circle())
-                .overlay(Circle().stroke(Color.primary.opacity(0.18), lineWidth: 0.8))
+                .background(Color.primary.opacity(0.14), in: Circle())
+                .overlay(Circle().stroke(Color.primary.opacity(0.28), lineWidth: 0.8))
                 .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)
@@ -402,8 +402,8 @@ struct AIChatView: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(DS.Palette.accent)
                     .frame(width: 32, height: 32)
-                    .background(Color.primary.opacity(0.09), in: Circle())
-                    .overlay(Circle().stroke(Color.primary.opacity(0.18), lineWidth: 0.8))
+                    .background(Color.primary.opacity(0.14), in: Circle())
+                    .overlay(Circle().stroke(Color.primary.opacity(0.28), lineWidth: 0.8))
                     .contentShape(Circle())
 
                 if !session.pending.isEmpty {
