@@ -19,9 +19,11 @@ enum AITextToHTML {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             paragraph = []
             guard !joined.isEmpty else { return }
-            // 段内换行保留为 <br/>，空行才分段
-            var body = escape(joined).replacingOccurrences(of: "\n", with: "<br/>")
-            body = typesetMath(body)
+            // **顺序很重要：先处理公式，再把换行转成 <br/>。**
+            // 反过来的话，行内公式内部的换行会先变成 `<br/>`，KaTeX 收到
+            // `<br/>` 就把它当强制换行，于是一行公式被拆成两行。
+            var body = typesetMath(escape(joined))
+            body = body.replacingOccurrences(of: "\n", with: "<br/>")
             out.append("<p>\(body)</p>")
         }
 
@@ -232,17 +234,17 @@ enum AITextToHTML {
     /// 这里只处理最常见的写法，覆盖 `∬_D`、`∫_α^β`、`r_{i}`、`**r**` 这类，
     /// 视觉上足够，且不影响编辑。
     private static func typesetMath(_ text: String) -> String {
-        // **含 $$ 的段落一律原样返回。**
-        // 里面有真正的 LaTeX，交给 KaTeX 处理；一旦在这里把 `x^p` 改成 `x<sup>p</sup>`，
-        // KaTeX 收到的就是残缺 HTML，整条公式渲染失败、退回显示源码。
-        // 之前 14.p 积分那条 `\begin{cases}` 不显示，就是这个原因。
-        if text.contains("$$") {
+        // **含 `$` 的段落一律原样返回（块级 `$$` 和行内 `$` 都算）。**
+        // 里面有真正的 LaTeX，交给 KaTeX 处理；一旦在这里把 `x^p` 改成
+        // `x<sup>p</sup>`、把 `x_1` 改成 `x<sub>1</sub>`，KaTeX 收到的就是
+        // 残缺 HTML——整条公式渲染失败，或者被拆成好几行。
+        if text.contains("$") {
             return text
         }
 
         // **裸 LaTeX 兜底。**
         // AI 经常不写 `$`，直接甩 `\iint_D f(x,y)dxdy=...`。
-        // 只要整段带数学命令、又没有中文字，就当块级公式包起来——
+        // 只要整段带数学命令、又没有成片中文，就当块级公式包起来——
         // 否则 KaTeX 看不见它，用户只能看到反斜杠源码。
         if looksLikeBareLaTeX(text) {
             // **先把换行压平。**
