@@ -8,6 +8,8 @@ struct AIChatView: View {
     @State private var showingAttachmentList = false
     /// 技能选择弹层
     @State private var showingSkillPicker = false
+    /// 附件选择弹层
+    @State private var showingAttachPicker = false
 
     var onApply: ((String) -> Void)?
 
@@ -356,8 +358,8 @@ struct AIChatView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DS.Palette.accent)
                 .frame(width: 32, height: 32)
-                .background(Color.primary.opacity(0.14), in: Circle())
-                .overlay(Circle().stroke(Color.primary.opacity(0.28), lineWidth: 0.8))
+                .background(Color.primary.opacity(0.10), in: Circle())
+                .overlay(Circle().stroke(Color.primary.opacity(0.20), lineWidth: 0.8))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -401,33 +403,16 @@ struct AIChatView: View {
     }
 
     private var attachMenu: some View {
-        Menu {
-
-            Button {
-                Task { @MainActor in
-                    let items = await AttachmentReader.pickImages()
-                    session.attach(items)
-                }
-            } label: {
-                Label("选择图片", systemImage: "photo")
-            }
-
-            Button {
-                Task { @MainActor in
-                    let items = await AttachmentReader.pickSpreadsheets()
-                    session.attach(items)
-                }
-            } label: {
-                Label("选择表格", systemImage: "tablecells")
-            }
+        Button {
+            showingAttachPicker.toggle()
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "plus")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(DS.Palette.accent)
                     .frame(width: 32, height: 32)
-                    .background(Color.primary.opacity(0.14), in: Circle())
-                    .overlay(Circle().stroke(Color.primary.opacity(0.28), lineWidth: 0.8))
+                    .background(Color.primary.opacity(0.10), in: Circle())
+                    .overlay(Circle().stroke(Color.primary.opacity(0.20), lineWidth: 0.8))
                     .contentShape(Circle())
 
                 if !session.pending.isEmpty {
@@ -442,10 +427,46 @@ struct AIChatView: View {
             }
             .contentShape(Circle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("添加图片或表格")
+        .buttonStyle(.plain)
+        .help("添加附件")
+        .popover(isPresented: $showingAttachPicker, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                attachOption("图片", icon: "photo") {
+                    Task { @MainActor in
+                        let items = await AttachmentReader.pickImages()
+                        session.attach(items)
+                    }
+                }
+                attachOption("表格", icon: "tablecells") {
+                    Task { @MainActor in
+                        let items = await AttachmentReader.pickSpreadsheets()
+                        session.attach(items)
+                    }
+                }
+            }
+            .padding(DS.Space.s)
+            .frame(width: 160)
+        }
+    }
+
+    private func attachOption(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button {
+            showingAttachPicker = false
+            action()
+        } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: icon)
+                    .frame(width: 18)
+                    .foregroundStyle(DS.Palette.accent)
+                Text(title)
+                    .font(.system(size: 12))
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, DS.Space.s)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var draftField: some View {
