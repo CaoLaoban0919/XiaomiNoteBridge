@@ -55,6 +55,22 @@ final class NoteCache: NoteCacheProtocol {
 
     // MARK: - 正文与图片
 
+    /// 从缓存里移除一条笔记：索引 + 正文 + 原文备份。
+    ///
+    /// 图片不按笔记删：一个 fileId 可能被多条笔记共用，
+    /// 按 noteId 反推该删哪几张并不安全，留给后续的缓存清理去做。
+    func removeNote(id noteId: String) throws {
+        let (notes, folders) = loadIndex()
+        try saveIndex(notes: notes.filter { $0.id != noteId }, folders: folders)
+
+        let base = Self.fileName(noteId)
+        for suffix in [".html", ".original.html"] {
+            try? FileManager.default.removeItem(
+                at: bodiesURL.appendingPathComponent(base + suffix)
+            )
+        }
+    }
+
     func content(for noteId: String) -> CachedNoteContent? {
         let url = bodiesURL.appendingPathComponent(Self.fileName(noteId) + ".html")
         guard let data = try? Data(contentsOf: url),

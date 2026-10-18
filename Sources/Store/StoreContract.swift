@@ -138,6 +138,8 @@ protocol NoteCacheProtocol: AnyObject {
     func saveOriginalIfAbsent(_ content: CachedNoteContent, for noteId: String) throws
     /// 读取 AI 改写前的原文。没有备份时返回 nil。
     func originalContent(for noteId: String) -> String?
+    /// 从缓存里移除一条笔记（索引 + 正文 + 原文备份）。
+    func removeNote(id noteId: String) throws
 
     /// 单独取一张图（列表缩略图之类会用到）
     func imageData(fileId: String) -> Data?

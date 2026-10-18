@@ -201,6 +201,14 @@ final class AIChatSession: ObservableObject {
         Task { await run() }
     }
 
+    /// 移除一张待发附件。
+    ///
+    /// 只动 `pending`：已经发出去的消息里的附件不该被这里影响——
+    /// 那个阶段的附件属于历史记录，删了会让对话里出现空白气泡。
+    func removeAttachment(_ item: ChatAttachment) {
+        pending.removeAll { $0.id == item.id }
+    }
+
     func retry() {
         guard canRetry else { return }
         if let last = messages.last, last.role == .assistant {

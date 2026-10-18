@@ -24,6 +24,7 @@ import WebKit
 private enum SidebarSelection: Hashable {
     case all
     case folder(id: String)
+    case trash
 }
 
 // MARK: - 本地缓存
@@ -66,6 +67,10 @@ struct MainView: View {
     @State private var showingImportApproval = false
     @State private var showingPermissions = false
     @State private var showingSettings = false
+    /// 把当前笔记移到回收站（可撤销，列表级）
+    @State private var confirmingMoveToTrash = false
+    /// 从回收站彻底删除（不可逆，要二次确认）
+    @State private var confirmingPermanentDelete = false
     @State private var automation: AutomationStatus = .notDetermined
     @State private var checking = true
 
@@ -140,18 +145,102 @@ struct MainView: View {
 
     // MARK: - 数据切片
 
+    /// 回收站里的笔记 id。
+    ///
+    /// 单独算一份而不是每次过滤都查一遍 state：
+    /// `currentNotes` 在每次重绘时都会求值，逐条 load 文件会把滚动拖卡。
+    private var trashedNoteIDs: Set<String> {
+        let state = SyncStateStore.load()
+        var ids: Set<String> = []
+        for (noteId, record) in state.notes where record.trashed == true {
+            ids.insert(noteId)
+        }
+        return ids
+    }
+
     /// 当前选中文件夹下的笔记。默认按修改时间倒序，与用户的直觉一致。
+    ///
+    /// **回收站里的笔记不出现在任何文件夹**：它们只在 `.trash` 分支里出现。
     private var currentNotes: [CachedNote] {
+        let trashed = trashedNoteIDs
+
+        // 回收站视图：只看被标记删除的
+        if let sidebarSelection, case .trash = sidebarSelection {
+            return pull.notes
+                .filter { trashed.contains($0.id) }
+                .sorted { $0.modifyDate > $1.modifyDate }
+        }
+
         let notes: [CachedNote]
         if let sidebarSelection, case .folder(let id) = sidebarSelection {
             notes = pull.notes.filter { $0.folderId == id }
         } else {
             notes = pull.notes
         }
-        return notes.sorted { $0.modifyDate > $1.modifyDate }
+        return notes
+            .filter { !trashed.contains($0.id) }
+            .sorted { $0.modifyDate > $1.modifyDate }
+    }
+
+    /// 当前是否处于回收站视图。
+    private var showingTrash: Bool {
+        if let sidebarSelection, case .trash = sidebarSelection { return true }
+        return false
+    }
+
+    /// 把笔记移到回收站：只改标记，不动内容。
+    private func moveToTrash(_ note: CachedNote) {
+        var state = SyncStateStore.load()
+        if var record = state.notes[note.id] {
+            record.trashed = true
+            state.notes[note.id] = record
+        } else {
+            // 从没同步过的笔记（缓存里有、state 里没有）补一条最小记录
+            var record = NoteRecord(noteId: note.id,
+                                    modifyDate: note.modifyDate,
+                                    appleId: note.appleId,
+                                    bodyHash: nil,
+                                    title: note.title,
+                                    snippet: note.snippet,
+                                    aiModified: nil,
+                                    status: .synced)
+            record.trashed = true
+            state.notes[note.id] = record
+        }
+        try? SyncStateStore.save(state)
+
+        selectedNoteID = nil
+        Task {
+            await pull.reloadFromCache()
+            afterCacheChanged()
+        }
+        showToast("已移到回收站")
+    }
+
+    /// 从回收站彻底删除。
+    ///
+    /// **只移除米记桥本地的缓存与记录，不动「备忘录」里的笔记。**
+    /// 原因：这条通道一旦接上，"确认一次"就足以把云端内容也带走；
+    /// 而用户在备忘录里自己删一次的成本极低。
+    private func deletePermanently(_ note: CachedNote) {
+        try? cache.removeNote(id: note.id)
+
+        var state = SyncStateStore.load()
+        state.notes.removeValue(forKey: note.id)
+        try? SyncStateStore.save(state)
+
+        selectedNoteID = nil
+        Task {
+            await pull.reloadFromCache()
+            afterCacheChanged()
+        }
+        showToast("已从米记桥删除（备忘录里仍保留）")
     }
 
     private var currentFolderTitle: String {
+        if let sidebarSelection, case .trash = sidebarSelection {
+            return "回收站"
+        }
         guard let sidebarSelection, case .folder(let id) = sidebarSelection else {
             return "全部笔记"
         }
@@ -296,6 +385,14 @@ struct MainView: View {
                 }
             } header: {
                 Text("文件夹").font(DS.Fonts.caption).foregroundStyle(.secondary)
+            }
+
+            Section {
+                Label("回收站", systemImage: "trash")
+                    .badge(trashedNoteIDs.count)
+                    .tag(SidebarSelection.trash)
+            } header: {
+                Text("整理").font(DS.Fonts.caption).foregroundStyle(.secondary)
             }
 
             Section {
@@ -537,6 +634,22 @@ struct MainView: View {
                             .help(showingOriginal ? "回到 AI 改写后的正文"
                                                   : "查看 AI 改写前的原文")
                         }
+
+                        // 回收站里给的是「彻底删除」，文件夹里给的是「移到回收站」。
+                        // 两步分开：第一步可撤销（列表级），第二步不可逆（要确认）。
+                        Button(role: .destructive) {
+                            if showingTrash {
+                                confirmingPermanentDelete = true
+                            } else {
+                                confirmingMoveToTrash = true
+                            }
+                        } label: {
+                            Image(systemName: showingTrash ? "trash.slash" : "trash")
+                                .font(.system(size: 11))
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .help(showingTrash ? "从回收站彻底删除" : "移到回收站")
                     }
 
                     HStack(spacing: DS.Space.s) {
@@ -578,6 +691,18 @@ struct MainView: View {
                 .frame(height: aiPanelHeight)
         }
         .navigationTitle(note.title)
+        .alert("移到回收站？", isPresented: $confirmingMoveToTrash) {
+            Button("移到回收站", role: .destructive) { moveToTrash(note) }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("它会从所有文件夹中消失，但仍能在回收站里找到，也可以放回来。")
+        }
+        .alert("彻底删除这条笔记？", isPresented: $confirmingPermanentDelete) {
+            Button("彻底删除", role: .destructive) { deletePermanently(note) }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("会从本地缓存和「备忘录」里一起删除，无法恢复。")
+        }
         // 底部居中的临时提示：写入、自动保存、撤销这类"刚发生"的反馈放这里，
         // 不打断操作，也不占用正文位置。
         .overlay(alignment: .bottom) { toastOverlay }

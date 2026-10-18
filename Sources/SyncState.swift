@@ -19,6 +19,12 @@ struct NoteRecord: Codable {
     /// **同步时必须跳过它。** 否则小米侧下次有改动时，`set body` 覆盖会把
     /// 用户花时间做的 AI 重构直接冲掉。用可选字段兼容旧 state.json。
     var aiModified: Bool?
+    /// 是否在回收站。
+    ///
+    /// 用可选字段兼容旧 state.json（没有这一项 = 不在回收站）。
+    /// 进回收站只是「从文件夹里消失」，笔记本身仍可阅读、可恢复；
+    /// 真正删除要用户在回收站里再确认一次。
+    var trashed: Bool?
     /// 当前状态
     var status: Status
 

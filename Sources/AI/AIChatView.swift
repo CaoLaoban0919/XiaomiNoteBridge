@@ -232,13 +232,29 @@ struct AIChatView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: DS.Space.s) {
                 ForEach(Array(session.pending.prefix(6))) { item in
-                    Button {
-                        showingAttachmentList = true
-                    } label: {
-                        thumbnail(item)
+                    // 缩略图右上角挂一个小叉：发出去之前总要能反悔，
+                    // 否则选错一张就只能清空重选。
+                    ZStack(alignment: .topTrailing) {
+                        Button {
+                            showingAttachmentList = true
+                        } label: {
+                            thumbnail(item)
+                        }
+                        .buttonStyle(.plain)
+                        .help(item.summaryLine)
+
+                        Button {
+                            session.removeAttachment(item)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 13))
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, Color.black.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                        .help("移除此附件")
+                        .offset(x: 5, y: -5)
                     }
-                    .buttonStyle(.plain)
-                    .help(item.summaryLine)
                 }
 
                 if session.pending.count > 6 {
