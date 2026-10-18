@@ -116,7 +116,9 @@ enum MathImageRenderer {
                 result = head + rest
                 continue
             }
-            let img = "<img src=\"\(dataURL)\" style=\"max-width:100%;max-height:140px;display:block;margin:8px 0;\">"
+            // 只限宽、不限高：公式是单行排版，硬压高度会让长公式整体缩小，
+            // 横向还留一大片空白——越压越难看。
+            let img = "<img src=\"\(dataURL)\" style=\"max-width:100%;display:block;margin:8px 0;\">"
             result.replaceSubrange(start.lowerBound..<end.upperBound, with: img)
         }
         return result

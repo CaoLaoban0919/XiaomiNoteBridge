@@ -245,7 +245,14 @@ enum AITextToHTML {
         // 只要整段带数学命令、又没有中文字，就当块级公式包起来——
         // 否则 KaTeX 看不见它，用户只能看到反斜杠源码。
         if looksLikeBareLaTeX(text) {
-            return "$$\(text)$$"
+            // **先把换行压平。**
+            // AI 常把一条公式折成多行（`\Rightarrow` 后面断行），
+            // 直接塞进 $$…$$ 会被 KaTeX 当成多段，渲染出来就是断开的几截。
+            let flat = text
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .joined(separator: " ")
+            return "$$\(flat)$$"
         }
 
         var result = text
@@ -276,16 +283,19 @@ enum AITextToHTML {
     /// 宁可漏判（保留原文，用户至少能读），也不要误判（把正文变成一堆乱码公式）。
     private static func looksLikeBareLaTeX(_ text: String) -> Bool {
         guard text.contains("\\") else { return false }
-        let commands = ["\\int", "\\iint", "\\iiint", "\\oint", "\\frac", "\\sqrt",
-                        "\\lim", "\\sum", "\\prod", "\\begin{", "\\alpha", "\\beta",
-                        "\\theta", "\\lambda", "\\sigma", "\\partial", "\\infty",
-                        "\\left", "\\right", "\\cdot", "\\times"]
+        let commands = ["\\int", "\\iint", "\\iiint", "\\oint", "\\frac", "\\dfrac",
+                        "\\sqrt", "\\lim", "\\sum", "\\prod", "\\begin{", "\\alpha",
+                        "\\beta", "\\theta", "\\lambda", "\\sigma", "\\partial",
+                        "\\infty", "\\left", "\\right", "\\cdot", "\\times",
+                        "\\Rightarrow", "\\rightarrow", "\\equiv", "\\text"]
         guard commands.contains(where: { text.contains($0) }) else { return false }
 
-        // 中文占比超过 20% 就不是公式段落
+        // **放宽中文阈值。**
+        // `\text{严格递增}` 里的中文是公式的一部分，不是"这段是散文"的证据。
+        // 阈值太低会把这类公式判成正文，结果就是用户看到一堆反斜杠。
         let chinese = text.unicodeScalars.filter { (0x4E00...0x9FFF).contains($0.value) }.count
         let total = max(text.unicodeScalars.count, 1)
-        return Double(chinese) / Double(total) < 0.2
+        return Double(chinese) / Double(total) < 0.45
     }
 
     /// 保留两位小数，避免 SVG 里出现超长浮点
