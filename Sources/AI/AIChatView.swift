@@ -333,17 +333,8 @@ struct AIChatView: View {
     private var composer: some View {
 
         HStack(alignment: .bottom, spacing: DS.Space.s) {
-            // 两个功能键共用一颗液态玻璃胶囊：它们是"调输入方式"的一组，
-            // 各自套一个圆会让底部出现三个彼此无关的圆圈。
-            HStack(spacing: 0) {
-                attachMenu
-                skillMenu
-            }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 3)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().stroke(DS.Palette.stroke, lineWidth: 0.8))
-
+            attachMenu
+            skillMenu
             draftField
             sendButton
         }
@@ -368,12 +359,13 @@ struct AIChatView: View {
                 }
             }
         } label: {
-            // 图标本身不再带背景——外面那层玻璃胶囊负责容器感，
-            // 里面再画圆会变成"圆套圆"。
+            // 每个功能键各自一颗独立的圆形玻璃按钮。
             Image(systemName: session.activeSkill.icon)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DS.Palette.accent)
-                .frame(width: 30, height: 30)
+                .frame(width: 32, height: 32)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 0.8))
                 .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)
@@ -407,7 +399,9 @@ struct AIChatView: View {
                 Image(systemName: "plus")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(DS.Palette.accent)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 0.8))
                     .contentShape(Circle())
 
                 if !session.pending.isEmpty {
