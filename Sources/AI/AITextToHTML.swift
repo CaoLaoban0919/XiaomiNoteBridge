@@ -9,6 +9,7 @@ enum AITextToHTML {
     static func render(_ text: String) -> String {
         var out: [String] = []
         var paragraph: [String] = []
+        var listItems: [String] = []
         var chartLines: [String] = []
         var inChart = false
 
@@ -22,6 +23,18 @@ enum AITextToHTML {
             var body = escape(joined).replacingOccurrences(of: "\n", with: "<br/>")
             body = typesetMath(body)
             out.append("<p>\(body)</p>")
+        }
+
+        func flushList() {
+            guard !listItems.isEmpty else { return }
+            let items = listItems.map { "<li>\(typesetMath(escape($0)))</li>" }.joined()
+            listItems = []
+            out.append("<ul>\(items)</ul>")
+        }
+
+        func flushBlocks() {
+            flushParagraph()
+            flushList()
         }
 
         func flushChart() {
@@ -48,7 +61,7 @@ enum AITextToHTML {
                 } else {
                     let language = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
                     if language.lowercased() == "chart" {
-                        flushParagraph()
+                        flushBlocks()
                         inChart = true
                     } else {
                         // 普通代码块：当普通段落处理（保留围栏）
@@ -60,16 +73,63 @@ enum AITextToHTML {
 
             if inChart {
                 chartLines.append(raw)
-            } else if trimmed.isEmpty {
-                flushParagraph()
-            } else {
-                paragraph.append(raw)
+                continue
             }
+
+            // 空行：结束当前块
+            if trimmed.isEmpty {
+                flushBlocks()
+                continue
+            }
+
+            // 分隔线
+            if trimmed == "---" || trimmed == "***" {
+                flushBlocks()
+                out.append("<hr/>")
+                continue
+            }
+
+            // 标题：# ~ ######。不转的话 `## 三、反常积分` 会原样显示。
+            if let (level, content) = heading(trimmed) {
+                flushBlocks()
+                let tag = level <= 2 ? "h2" : (level == 3 ? "h3" : "h4")
+                out.append("<\(tag)>\(typesetMath(escape(content)))</\(tag)>")
+                continue
+            }
+
+            // 无序列表
+            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("• ") {
+                flushParagraph()
+                listItems.append(String(trimmed.dropFirst(2)))
+                continue
+            }
+            if !listItems.isEmpty { flushList() }
+
+            // 引用
+            if trimmed.hasPrefix("> ") {
+                flushParagraph()
+                out.append("<blockquote>\(typesetMath(escape(String(trimmed.dropFirst(2)))))</blockquote>")
+                continue
+            }
+
+            paragraph.append(raw)
         }
 
-        flushParagraph()
+        flushBlocks()
         if inChart { flushChart() }
         return out.joined()
+    }
+
+    /// 解析 `## 标题`，返回层级与内容。
+    private static func heading(_ line: String) -> (Int, String)? {
+        var level = 0
+        var rest = line[...]
+        while rest.first == "#" {
+            level += 1
+            rest = rest.dropFirst()
+        }
+        guard level > 0, level <= 6, rest.first == " " else { return nil }
+        return (level, String(rest.dropFirst()).trimmingCharacters(in: .whitespaces))
     }
 
     // MARK: - SVG
@@ -172,6 +232,14 @@ enum AITextToHTML {
     /// 这里只处理最常见的写法，覆盖 `∬_D`、`∫_α^β`、`r_{i}`、`**r**` 这类，
     /// 视觉上足够，且不影响编辑。
     private static func typesetMath(_ text: String) -> String {
+        // **裸 LaTeX 兜底。**
+        // AI 经常不写 `$`，直接甩 `\iint_D f(x,y)dxdy=...`。
+        // 只要整段带数学命令、又没有中文字，就当块级公式包起来——
+        // 否则 KaTeX 看不见它，用户只能看到反斜杠源码。
+        if !text.contains("$$"), looksLikeBareLaTeX(text) {
+            return "$$\(text)$$"
+        }
+
         var result = text
 
         // r_{i+1} / x_{max}：先处理带花括号的，否则会被单字符规则拆坏
@@ -192,6 +260,24 @@ enum AITextToHTML {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
         let range = NSRange(text.startIndex..., in: text)
         return regex.stringByReplacingMatches(in: text, range: range, withTemplate: template)
+    }
+
+    /// 判断一段文字是不是「忘了写 $ 的 LaTeX」。
+    ///
+    /// 三个条件同时满足才算：有反斜杠命令、命令属于数学类、没有成片中文。
+    /// 宁可漏判（保留原文，用户至少能读），也不要误判（把正文变成一堆乱码公式）。
+    private static func looksLikeBareLaTeX(_ text: String) -> Bool {
+        guard text.contains("\\") else { return false }
+        let commands = ["\\int", "\\iint", "\\iiint", "\\oint", "\\frac", "\\sqrt",
+                        "\\lim", "\\sum", "\\prod", "\\begin{", "\\alpha", "\\beta",
+                        "\\theta", "\\lambda", "\\sigma", "\\partial", "\\infty",
+                        "\\left", "\\right", "\\cdot", "\\times"]
+        guard commands.contains(where: { text.contains($0) }) else { return false }
+
+        // 中文占比超过 20% 就不是公式段落
+        let chinese = text.unicodeScalars.filter { (0x4E00...0x9FFF).contains($0.value) }.count
+        let total = max(text.unicodeScalars.count, 1)
+        return Double(chinese) / Double(total) < 0.2
     }
 
     /// 保留两位小数，避免 SVG 里出现超长浮点
