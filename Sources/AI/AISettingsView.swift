@@ -225,6 +225,7 @@ struct AISettingsSheet: View {
             Spacer(minLength: 0)
             Button("保存") { save() }
                 .keyboardShortcut(.defaultAction)
+                .dsPrimaryButton()
         }
         .padding(.horizontal, DS.Space.xl)
         .padding(.vertical, DS.Space.l)
@@ -360,6 +361,7 @@ struct AISettingsSheet: View {
             } label: {
                 Label("检索模型", systemImage: "magnifyingglass")
             }
+            .dsPrimaryButton()
             .disabled(catalog.isLoading)
 
             Button("手动填写") { openManualEntry() }
@@ -439,11 +441,7 @@ struct AISettingsSheet: View {
         }
         .padding(DS.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DS.Palette.surface, in: RoundedRectangle(cornerRadius: DS.Radius.m))
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.Radius.m)
-                .stroke(DS.Palette.stroke, lineWidth: 1)
-        )
+        .dsGlass(cornerRadius: DS.Radius.m, fallbackStroke: true)
     }
 
     private var searchField: some View {

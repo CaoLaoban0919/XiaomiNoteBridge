@@ -126,6 +126,13 @@ protocol NoteCacheProtocol: AnyObject {
     func content(for noteId: String) -> CachedNoteContent?
     func saveContent(_ content: CachedNoteContent, for noteId: String) throws
 
+    /// 只写正文，不动图片。
+    ///
+    /// 用户打字的落盘走这条：正文每 600ms 变一次，而图片在编辑过程中不会变。
+    /// 用 `saveContent` 的话，一条带十张图的笔记每敲一下就要把几十兆字节重写一遍，
+    /// 主线程会被磁盘 IO 拖住。
+    func saveHTML(_ html: String, for noteId: String) throws
+
     /// 保存「AI 改写前的原文」，**只在没有备份时才写**。
     /// 每次改写都覆盖的话，"原文"会跟着往后漂，用户看到的就是上一次 AI 的版本了。
     func saveOriginalIfAbsent(_ content: CachedNoteContent, for noteId: String) throws

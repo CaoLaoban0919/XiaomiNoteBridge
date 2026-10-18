@@ -10,6 +10,14 @@ struct OnboardingView: View {
 
     var body: some View {
         content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // 整页一块玻璃。
+            //
+            // 窗口本身是透明的，没有这一层，标题和正文会直接压在桌面壁纸上，
+            // 换张花一点的壁纸就没法读了。
+            //
+            // 圆角给 0：窗口已经有系统圆角，再切一次会出现两道边。
+            .dsGlass(cornerRadius: 0, fallbackStroke: false)
     }
 
     @ViewBuilder

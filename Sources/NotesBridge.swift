@@ -57,7 +57,6 @@ enum NotesBridge {
         // 只有用户主动点「授权」（askUser == true）时才允许 AE 去拉起它。
         let running = !NSRunningApplication.runningApplications(withBundleIdentifier: notesBundleID).isEmpty
         if !running && !askUser {
-            print("[NotesBridge] automationStatus: 未运行且未请求授权 → targetNotRunning（未发出任何 Apple Event）")
             return .targetNotRunning
         }
 
@@ -73,7 +72,6 @@ enum NotesBridge {
         let cls = AEEventClass(0x2A2A2A2A)   // '****'
         let eid = AEEventID(0x2A2A2A2A)      // '****'
         let status = AEDeterminePermissionToAutomateTarget(&target, cls, eid, askUser)
-        print("[NotesBridge] automationStatus: running=\(running) askUser=\(askUser) → \(status)")
 
         switch status {
         case noErr: return .authorized

@@ -62,7 +62,6 @@ enum AttachmentReader {
             case "csv":
                 text = csvText(from: data)
             default:
-                print("[AttachmentReader] 跳过 \(url.lastPathComponent)：不支持的表格格式")
                 text = nil
             }
 
@@ -109,7 +108,6 @@ enum AttachmentReader {
                                   extractedText: text)
 
         default:
-            print("[AttachmentReader] 跳过 \(name)：不支持的类型")
             return nil
         }
     }
@@ -137,14 +135,11 @@ enum AttachmentReader {
     private static func readData(_ url: URL) -> Data? {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         if size > maxFileSize {
-            let mb = String(format: "%.1f", Double(size) / 1024 / 1024)
-            print("[AttachmentReader] 跳过 \(url.lastPathComponent)：\(mb) MB，超过 20 MB 上限")
             return nil
         }
         do {
             return try Data(contentsOf: url)
         } catch {
-            print("[AttachmentReader] 跳过 \(url.lastPathComponent)：读取失败 \(error.localizedDescription)")
             return nil
         }
     }
@@ -184,7 +179,6 @@ enum AttachmentReader {
         }
 
         guard var text = raw else {
-            print("[AttachmentReader] 跳过 CSV：既不是 UTF-8 也不是 GB18030")
             return nil
         }
 
@@ -223,7 +217,6 @@ enum AttachmentReader {
             try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
             try unzip(url, to: tmpDir)
         } catch {
-            print("[AttachmentReader] 跳过 \(url.lastPathComponent)：解压失败 \(error.localizedDescription)")
             return nil
         }
 
@@ -232,7 +225,6 @@ enum AttachmentReader {
         let sharedStrings = parseSharedStrings(at: tmpDir)
 
         guard let sheetURL = firstWorksheet(in: tmpDir) else {
-            print("[AttachmentReader] 跳过 \(url.lastPathComponent)：包里没有工作表")
             return nil
         }
 

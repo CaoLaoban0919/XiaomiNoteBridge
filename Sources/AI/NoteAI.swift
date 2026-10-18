@@ -144,9 +144,6 @@ final class NoteAI: ObservableObject, NoteAIProtocol {
         // data URI 图片会让 AppleScript 直接报错、flex/grid 布局会让排版整段崩掉。
         // 在这里过一遍，把"写不进去"的内容提前处理掉，而不是等它抛错再猜原因。
         let cleaned = NotesHTMLSanitizer.sanitizeWithReport(withoutImages)
-        if !cleaned.fixes.isEmpty {
-            print("[NoteAI] HTML 已规范化：\(cleaned.fixes.joined(separator: "；"))")
-        }
         try await NotesImporter.setBody(id: appleId, html: cleaned.html)
 
         // 图片在正文写完之后插入。Notes 会把文件复制进自己的库，
@@ -161,11 +158,9 @@ final class NoteAI: ObservableObject, NoteAIProtocol {
             defer { for url in urls { try? FileManager.default.removeItem(at: url) } }
 
             do {
-                let cids = try await NotesImporter.insertImages(id: appleId, fileURLs: urls)
-                print("[NoteAI] 已插入 \(cids.count) 张图片（正文占位 \(embeddedImages.count) 处）")
+                _ = try await NotesImporter.insertImages(id: appleId, fileURLs: urls)
             } catch {
                 // 图片插不进去不该让整次写入失败：文字部分已经落盘了
-                print("[NoteAI] 插入图片失败：\(error.localizedDescription)")
             }
         }
 

@@ -177,6 +177,142 @@ enum DS {
     static let mainWindowSize = CGSize(width: 1000, height: 680)
 }
 
+// MARK: - 液态玻璃表层
+
+/// 统一的"表层"材质。
+///
+/// macOS 26（Liquid Glass）起用真正的玻璃：折射、边缘高光、按下回弹全由系统给。
+/// 更早的系统回落到原来的半透明平面 —— **布局完全不变，只有材质不同**。
+///
+/// 为什么做成一个修饰器，而不是在每个视图里写 `if #available`：
+/// 这类判断一旦散开，迟早出现"卡片是玻璃、底部栏还是平面"的割裂感。
+/// 收在一处，将来换材质只改这个文件。
+struct DSGlassSurface: ViewModifier {
+    var cornerRadius: CGFloat = DS.Radius.m
+    var tint: Color? = nil
+    /// 回退到平面时要不要描边。玻璃自带边缘高光，不需要再叠一圈线。
+    var fallbackStroke: Bool = true
+    var interactive: Bool = false
+    /// 玻璃本身要不要吃语义色。
+    ///
+    /// **大面积的语义块（状态条）必须关掉它。** 系统玻璃对 tint 的放大远超过
+    /// 原来平面上的 9% 淡色：一点"已授权"的绿会变成一整块高饱和绿，
+    /// `secondary` 会变成两块脏灰。关掉之后只留彩色图标，颜色信息不丢，视觉却干净。
+    var tintGlass: Bool = true
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(glass, in: RoundedRectangle(cornerRadius: cornerRadius))
+        } else {
+            content
+                .background(tint.map { DS.Palette.tint($0) } ?? DS.Palette.surface,
+                            in: RoundedRectangle(cornerRadius: cornerRadius))
+                .overlay {
+                    if fallbackStroke {
+                        RoundedRectangle(cornerRadius: cornerRadius)
+                            .stroke(tint?.opacity(0.25) ?? DS.Palette.stroke, lineWidth: 1)
+                    }
+                }
+        }
+    }
+
+    @available(macOS 26.0, *)
+    private var glass: Glass {
+        var value: Glass = .regular
+        // 即便允许染色，也只给到 22% —— 全强度 tint 在玻璃上会压掉文字对比度。
+        if let tint, tintGlass { value = value.tint(tint.opacity(0.22)) }
+        if interactive { value = value.interactive() }
+        return value
+    }
+}
+
+extension View {
+    /// 给容器套一层玻璃（不改变任何尺寸与间距）。
+    func dsGlass(cornerRadius: CGFloat = DS.Radius.m,
+                 tint: Color? = nil,
+                 fallbackStroke: Bool = true,
+                 interactive: Bool = false,
+                 tintGlass: Bool = true) -> some View {
+        modifier(DSGlassSurface(cornerRadius: cornerRadius,
+                                tint: tint,
+                                fallbackStroke: fallbackStroke,
+                                interactive: interactive,
+                                tintGlass: tintGlass))
+    }
+
+    /// 主操作按钮。macOS 26 起用玻璃高光样式，更早保持系统默认外观。
+    @ViewBuilder
+    func dsPrimaryButton() -> some View {
+        if #available(macOS 26.0, *) {
+            self.buttonStyle(.glassProminent)
+        } else {
+            self
+        }
+    }
+}
+
+/// 分段控件里被选中的那一片。
+///
+/// **只有它用玻璃，外层容器保持平面。** 玻璃叠玻璃会糊成一片，
+/// 而"选中块浮在平面上"恰好是分段控件想要的层次。
+struct DSGlassPill: View {
+    var cornerRadius: CGFloat = DS.Radius.s
+
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(Color.primary.opacity(0.04))
+                .glassEffect(.regular.interactive(),
+                             in: RoundedRectangle(cornerRadius: cornerRadius))
+        } else {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(Color.primary.opacity(0.10))
+        }
+    }
+}
+
+// MARK: - 临时提示气泡
+
+/// 底部居中的临时反馈：写入成功、自动保存、撤销恢复这类"刚发生"的事。
+///
+/// 用气泡而不是 alert：这些反馈不需要用户确认，弹窗反而要多点一下才能继续干活。
+/// 材质走和全局一致的玻璃；`undo` 有值时右侧出现「撤销」。
+struct DSToastBubble: View {
+    let text: String
+    var icon: String = "checkmark.circle.fill"
+    var tint: Color = DS.Status.ok
+    var undo: (() -> Void)? = nil
+
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            bubble.glassEffect(.regular, in: Capsule())
+        } else {
+            bubble
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(DS.Palette.stroke, lineWidth: DS.Optical.hairline))
+        }
+    }
+
+    private var bubble: some View {
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .foregroundStyle(tint)
+
+            Text(text).font(DS.Fonts.label)
+
+            if let undo {
+                Button("撤销", action: undo)
+                    .buttonStyle(.link)
+                    .font(DS.Fonts.label)
+            }
+        }
+        .padding(.horizontal, DS.Space.l)
+        .padding(.vertical, DS.Space.s)
+    }
+}
+
 // MARK: - 骨架组件
 
 /// 页面头：标题 + 一句说明。所有页面统一用它，保证字号与间距一致。
@@ -222,12 +358,7 @@ struct DSCard<Content: View>: View {
         }
         .padding(DS.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.map { DS.Palette.tint($0) } ?? DS.Palette.surface,
-                    in: RoundedRectangle(cornerRadius: DS.Radius.m))
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.Radius.m)
-                .stroke(tint?.opacity(0.25) ?? .clear, lineWidth: 1)
-        )
+        .dsGlass(cornerRadius: DS.Radius.m, tint: tint, fallbackStroke: tint != nil)
     }
 }
 
@@ -284,8 +415,8 @@ struct DSStatusBar: View {
         }
         .padding(DS.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DS.Palette.tint(tint), in: RoundedRectangle(cornerRadius: DS.Radius.m))
-        .overlay(RoundedRectangle(cornerRadius: DS.Radius.m).stroke(tint.opacity(0.25), lineWidth: 1))
+        // 只让图标带语义色，整块玻璃保持中性。
+        .dsGlass(cornerRadius: DS.Radius.m, tint: tint, fallbackStroke: true, tintGlass: false)
     }
 }
 
@@ -353,10 +484,11 @@ struct DSSegmented<T: Hashable>: View {
                         .padding(.horizontal, DS.Space.l)
                         .padding(.vertical, DS.Optical.compact)
                         .frame(maxWidth: .infinity)
-                        .background(
-                            RoundedRectangle(cornerRadius: DS.Radius.s)
-                                .fill(selection == opt.value ? Color.primary.opacity(0.10) : .clear)
-                        )
+                        .background {
+                            if selection == opt.value {
+                                DSGlassPill(cornerRadius: DS.Radius.s)
+                            }
+                        }
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -419,8 +551,7 @@ struct DSReaderPane<Content: View>: View {
                 .padding(.vertical, DS.Space.l)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(DS.Palette.surfaceDeep)
-        .overlay(RoundedRectangle(cornerRadius: DS.Radius.m).stroke(DS.Palette.stroke, lineWidth: 1))
+        .dsGlass(cornerRadius: DS.Radius.m, fallbackStroke: true)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.m))
     }
 }

@@ -39,8 +39,6 @@ struct LoginStepView: View {
                 VStack(alignment: .leading, spacing: DS.Space.m) {
                     loginCard
                     consentCard
-                    // 临时调试条，仅在开关打开时出现。验证完连同模型里那段一起删。
-                    if LoginModel.debugErrors { debugStrip }
                 }
                 .padding(.horizontal, DS.Space.screen)
                 .padding(.bottom, DS.Space.m)
@@ -125,7 +123,7 @@ struct LoginStepView: View {
                             .font(DS.Fonts.label).foregroundStyle(.secondary)
                     }
                     .padding(DS.Space.xl)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.m))
+                    .dsGlass(cornerRadius: DS.Radius.m, fallbackStroke: false)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -149,30 +147,6 @@ struct LoginStepView: View {
         }
         .onAppear { web.start() }
         .onDisappear { model.stopPolling() }
-    }
-
-    // MARK: - 临时调试条
-
-    /// **临时代码**：仅当 `debugErrors` 开关打开时渲染。验证完删掉。
-    private var debugStrip: some View {
-        DSCard(title: "调试 · 手动触发错误分支", icon: "hammer", tint: DS.Status.warn) {
-            VStack(alignment: .leading, spacing: DS.Space.s) {
-                Text("这几个分支正常操作触发不到，用一个假错误把它们叫出来看看。"
-                     + "关掉开关就整条消失：defaults write local.minotebridge.app debugErrors -bool false")
-                    .font(DS.Fonts.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack(spacing: DS.Space.s) {
-                    Button("服务端登录失败") { model.debugServerFailure() }
-                    Button("人机验证弹窗") { model.debugCaptcha() }
-                    Button("手机号格式错") { model.debugPhoneError() }
-                    Button("网页登录兜底") { model.debugWebFallback() }
-                    Spacer(minLength: 0)
-                }
-                .controlSize(.small)
-            }
-        }
     }
 
     // MARK: - 网页登录兜底弹窗
@@ -211,7 +185,7 @@ struct LoginStepView: View {
                             .font(DS.Fonts.label).foregroundStyle(.secondary)
                     }
                     .padding(DS.Space.xl)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.m))
+                    .dsGlass(cornerRadius: DS.Radius.m, fallbackStroke: false)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1344,81 +1318,6 @@ final class LoginModel: ObservableObject {
         passwordSession = nil
         passwordParams = nil
         captchaURL = nil
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // MARK: - 临时调试：手动触发错误分支
-    //
-    // 下面这几十行是**临时代码**，验证完就整段删掉，不参与正式流程。
-    //
-    // 存在的理由：服务端拒绝、人机验证、网页兜底这三个分支，
-    // 用正常操作根本触发不到（要触发就得反复失败登录，可能把账号风控掉）。
-    // 没有这段代码，这三条路径就只能靠读代码相信它对。
-    //
-    // 开关：
-    //   defaults write local.minotebridge.app debugErrors -bool true   开启
-    //   defaults write local.minotebridge.app debugErrors -bool false  关闭
-    // ═══════════════════════════════════════════════════════════
-
-    static var debugErrors: Bool {
-        ProcessInfo.processInfo.environment["MINB_DEBUG_ERRORS"] == "1"
-            || UserDefaults.standard.bool(forKey: "debugErrors")
-    }
-
-    func debugServerFailure() {
-        fail("登录失败（调试）",
-             "这是调试用的假错误。真实情况下这里显示的是小米返回的原话，"
-             + "例如「账号或密码不正确」。注意弹窗里多了一个「改用网页登录」。",
-             offersWebFallback: true)
-    }
-
-    func debugPhoneError() {
-        fail("手机号格式不正确",
-             "中国大陆手机号应为 11 位、以 1 开头。\n你当前填了 5 位。")
-    }
-
-    /// 伪造一张图形验证码，用来检查弹窗排版。
-    /// 注意：真实的图片是从小米服务器取的，这里只是让弹窗能看。
-    func debugCaptcha() {
-        captchaURL = nil
-        captchaCode = ""
-        captchaImage = Self.debugCaptchaImage(text: "A7K2")
-        showCaptcha = true
-    }
-
-    func debugWebFallback() {
-        openWebFallback()
-    }
-
-    private static func debugCaptchaImage(text: String) -> NSImage {
-        let size = NSSize(width: 150, height: 46)
-        let image = NSImage(size: size)
-        image.lockFocus()
-
-        NSColor.white.setFill()
-        NSRect(origin: .zero, size: size).fill()
-
-        // 几道干扰线，模拟真实验证码的观感
-        NSColor.gray.withAlphaComponent(0.45).setStroke()
-        for i in 0..<4 {
-            let path = NSBezierPath()
-            path.move(to: NSPoint(x: 0, y: CGFloat(6 + i * 11)))
-            path.line(to: NSPoint(x: size.width, y: CGFloat(3 + i * 13)))
-            path.lineWidth = 1
-            path.stroke()
-        }
-
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 28, weight: .semibold),
-            .foregroundColor: NSColor.darkGray,
-        ]
-        let string = NSAttributedString(string: text, attributes: attrs)
-        let textSize = string.size()
-        string.draw(at: NSPoint(x: (size.width - textSize.width) / 2,
-                                y: (size.height - textSize.height) / 2))
-
-        image.unlockFocus()
-        return image
     }
 
     // MARK: 验证码

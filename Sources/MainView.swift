@@ -1,6 +1,7 @@
 import SwiftUI
 import Foundation
 import AppKit
+import WebKit
 
 // 主界面（三栏式）。这一版的核心变化：**「拉取」与「导入」彻底分开**。
 //
@@ -23,39 +24,6 @@ import AppKit
 private enum SidebarSelection: Hashable {
     case all
     case folder(id: String)
-}
-
-// MARK: - 详情栏 AI 重构的状态机
-
-/// 详情栏 AI 区域的全部状态。**每一次只处在其中一个态**，界面按态渲染对应出口：
-///
-///     idle ──(用 AI 重构这条笔记)──▶ running ──成功──▶ preview ──(写入备忘录)──▶ applied
-///                                              │                    │
-///                                              │                    └─(放弃)──▶ idle
-///                                              └──失败──▶ failed ──(再试)──▶ running
-///
-/// 关键词：**先预览再写入**。`preview` 态只把结果留在内存里，
-/// 只有用户点「写入备忘录」才会真正碰用户的备忘录数据。
-private enum AIRewriteState {
-    /// 无进行中的任务：显示输入框与主按钮。
-    case idle
-    /// 正在请求模型（重构中或写入中）。
-    case running
-    /// 已拿到结果、等待用户确认。
-    case preview(AIRewritePreview)
-    /// 请求或写入失败。文本直接来自 `error.localizedDescription`，不吞。
-    case failed(String)
-    /// 写入成功。
-    case applied(String)
-}
-
-/// 预览所需的一整套：模型结果 + 已解析好的块。
-///
-/// 解析在拿到结果时做一次并在这里缓存，避免 SwiftUI 每次重绘都重跑一遍 HTML 解析
-/// （与 `noteBlocks` 同一个理由）。
-private struct AIRewritePreview {
-    var result: NoteAIResult
-    var blocks: [NoteBlock]
 }
 
 // MARK: - 本地缓存
@@ -140,44 +108,35 @@ struct MainView: View {
     /// 拖动起点的**全局** Y 坐标。不用 translation 是因为拖动条自身会移动。
     @State private var dragStartLocation: CGFloat?
 
-    /// 临时提示气泡（带撤销）。几秒后自动消失。
+    /// 最近一次真正落盘的正文。
+    ///
+    /// 用它区分「打开笔记时的载入」与「用户真的改了字」：
+    /// 没有它，每切一条笔记都会立刻弹一次「已保存」——因为 `loadBody` 也会触发
+    /// `onChange(of: noteHTML)`，那不是编辑。
+    @State private var persistedHTML = ""
+    /// 上一次「自动保存」气泡的时间。连续输入时用它限流，免得每 600ms 弹一次。
+    @State private var lastAutoSaveToast = Date.distantPast
+
+    /// 临时提示气泡（可带撤销）。几秒后自动消失。
     @State private var toast: ToastState?
 
     private struct ToastState: Identifiable {
         let id = UUID()
         var text: String
+        var icon: String = "checkmark.circle.fill"
+        var tint: Color = DS.Status.ok
+        var duration: Double = 4
         var undo: (() -> Void)?
     }
     /// 选中笔记是否已被 AI 重构过（决定详情栏上的标记）。
     @State private var noteAIModified = false
 
-    // MARK: 详情栏的 AI 重构
+    // MARK: AI
 
-    /// 与设置界面共用同一个客户端实例——否则设置改了地址、发请求的还是旧配置。
-    @ObservedObject private var aiProvider = AIProvider.shared
     @StateObject private var noteAI = NoteAI(provider: AIProvider.shared)
-    /// 用户填写的额外要求（可选）
-    @State private var aiInstruction = ""
-    /// 详情栏 AI 区域的状态机
-    @State private var aiState: AIRewriteState = .idle
-    /// 当前这次 AI 任务属于哪条笔记。用户中途切走时，在途任务的结果不能再贴回来。
-    @State private var aiRunningNoteId: String?
-    @State private var showingAISettings = false
 
     /// 对话式 AI 会话。与当前选中的笔记绑定，切笔记时清空。
     @StateObject private var chat = AIChatSession()
-
-    /// 拖拽悬停的区域。
-    ///
-    /// 同一份文件拖到不同区域会有不同结果，没有视觉反馈用户无法预判松手会发生什么。
-    @State private var hoveredZone: DropZone?
-
-    private enum DropZone: Equatable {
-        /// 拖到笔记区：作为这条笔记的素材
-        case note
-        /// 拖到对话区：直接交给 AI 分析
-        case ai
-    }
 
     // MARK: - 数据切片
 
@@ -223,7 +182,11 @@ struct MainView: View {
         !selectableNotes.isEmpty && selectableNotes.allSatisfy { importSelection.contains($0.id) }
     }
 
-    /// 「导入选中项」能否点：**没有勾选就必须禁用**，别让按钮可点却没反应。
+    /// 「导入选中项」能否点。
+    ///
+    /// 按钮本身只在有勾选时出现，所以这里的 `!importSelection.isEmpty`
+    /// 是给「导入进行中勾选被清空」这类瞬时状态兜底的——防的是动画还没收完、
+    /// 按钮仍在的那一两帧被点到。
     private var canImport: Bool {
         !importSelection.isEmpty && !importer.isRunning && !pull.isRunning
     }
@@ -257,7 +220,6 @@ struct MainView: View {
         }
         .sheet(isPresented: $showingPermissions) { PermissionListSheet() }
         .sheet(isPresented: $showingSettings) { SettingsSheet() }
-        .sheet(isPresented: $showingAISettings) { AISettingsSheet() }
         // 导入的审批入口。**点开它不等于开始写**——只是把「会写掉什么」先摆出来，
         // 真正写备忘录要等用户在 sheet 里点「执行」，那时才会走到 `startImport`。
         .sheet(isPresented: $showingImportApproval) {
@@ -267,6 +229,45 @@ struct MainView: View {
                 }
             }
         }
+        // 菜单快捷键 → 正文编辑器。注册在这里而不是每个按钮上，键位只此一处。
+        .onAppear {
+            EditorShortcuts.shared.flushSave = { flushBodySave() }
+            EditorShortcuts.shared.sendCommand = { command in
+                // 只有焦点在正文里才接格式指令。
+                // 否则用户在 AI 输入框按 ⌘B，改掉的是背后那条笔记——属于严重错误。
+                guard isBodyEditorFocused else { return }
+                editorCommand = command
+            }
+            EditorShortcuts.shared.undo = { redo in
+                guard isBodyEditorFocused else { return false }
+                editorCommand = redo ? .redo : .undo
+                return true
+            }
+            EditorShortcuts.shared.setEditableNote(selectedNote?.hasBody == true)
+        }
+        .onDisappear {
+            EditorShortcuts.shared.flushSave = nil
+            EditorShortcuts.shared.sendCommand = nil
+            EditorShortcuts.shared.undo = nil
+            EditorShortcuts.shared.setEditableNote(false)
+        }
+        .onChange(of: selectedNote?.hasBody ?? false) { _, hasBody in
+            EditorShortcuts.shared.setEditableNote(hasBody)
+        }
+    }
+
+    /// 焦点是否落在正文 WebView 里。
+    ///
+    /// 不能只判 `firstResponder is WKWebView`：WebKit 实际把内部视图
+    /// （`WKContentView`）设成第一响应者，所以要顺着 superview 往上找。
+    private var isBodyEditorFocused: Bool {
+        guard let responder = NSApp.keyWindow?.firstResponder as? NSView else { return false }
+        var view: NSView? = responder
+        while let current = view {
+            if current is WKWebView { return true }
+            view = current.superview
+        }
+        return false
     }
 
     // MARK: - 左栏：文件夹列表 + 操作
@@ -330,13 +331,6 @@ struct MainView: View {
                 .disabled(pull.isRunning || importer.isRunning || onboarding.cookie == nil)
 
                 Button {
-                    openImportApproval()
-                } label: {
-                    Label(importButtonTitle, systemImage: "square.and.arrow.down.on.square")
-                }
-                .disabled(!canImport)
-
-                Button {
                     showingSettings = true
                 } label: {
                     Label("设置", systemImage: "gearshape")
@@ -353,6 +347,10 @@ struct MainView: View {
             }
         }
         .listStyle(.sidebar)
+        // 让系统的侧栏底让位：不隐藏的话它会在玻璃下面再垫一层不透明底，
+        // 玻璃就只剩"一层灰"，看不到折射。
+        .scrollContentBackground(.hidden)
+        .background { sidebarGlass }
         .navigationTitle("米记桥")
         // 不设这个的话用系统默认宽度，实测偏窄，文件夹列表会显得局促。
         // 给 min/max 是为了保留用户自己拖宽拖窄的能力。
@@ -361,8 +359,38 @@ struct MainView: View {
                                         max: DS.Size.sidebarMaxWidth)
     }
 
+    /// 左栏的液态玻璃底。
+    ///
+    /// **必须先铺一层淡淡的渐变。** 玻璃的本质是"折射它背后的东西"，
+    /// 而窗口底本身是纯色——没有可折射的内容时，玻璃只会呈现一块均匀的浅灰，
+    /// 看起来跟原来的平面没区别。这层强调色渐变就是给它折射的"底片"，
+    /// 透明度压得很低，不改变任何布局，也不抢文字。
+    @ViewBuilder
+    private var sidebarGlass: some View {
+        ZStack {
+            // 中性底：让侧栏与内容区**有层次**。
+            // 只铺玻璃的话，白底玻璃和白底内容会糊成一片，反而比原来的系统侧栏更平。
+            DS.Palette.surfaceDeep
+
+            // 极淡的强调色渐变：玻璃要有东西可折射才像玻璃，纯色底上它只是一层灰。
+            LinearGradient(
+                colors: [DS.Palette.accent.opacity(0.10),
+                         DS.Palette.accent.opacity(0.02),
+                         Color.clear],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            if #available(macOS 26.0, *) {
+                // 直角玻璃：侧栏贴到窗口边缘，圆角会和标题栏的接缝打架。
+                Color.clear.glassEffect(.regular, in: Rectangle())
+            }
+        }
+        .ignoresSafeArea()
+    }
+
     private var importButtonTitle: String {
-        importSelection.isEmpty ? "导入选中项" : "导入选中项（\(importSelection.count)）"
+        "导入选中项（\(importSelection.count)）"
     }
 
     // MARK: - 中栏：笔记列表（带导入勾选）
@@ -377,7 +405,9 @@ struct MainView: View {
                     Divider()
                     List(selection: $selectedNoteID) {
                         ForEach(currentNotes) { note in
-                            NoteRow(note: note, isChecked: importBinding(for: note))
+                            NoteRow(note: note,
+                                    isChecked: importBinding(for: note),
+                                    isAIModified: note.id == selectedNoteID ? noteAIModified : note.aiModified)
                                 .tag(note.id)
                         }
                     }
@@ -390,7 +420,11 @@ struct MainView: View {
         .onChange(of: sidebarSelection) { _, _ in clearOffscreenSelection() }
     }
 
-    /// 列表顶部的「全选 / 全不选」与计数。
+    /// 列表顶部的「全选 / 全不选」「导入选中项」与计数。
+    ///
+    /// 导入按钮**只在有勾选时才出现**：没有勾选时它必然是禁用的，
+    /// 一块灰着的按钮除了占地方没有任何信息量。出现/消失走同一个动画，
+    /// 不然文字会先跳一下再淡入。
     private var listToolbar: some View {
         HStack(spacing: DS.Space.s) {
             Button(allSelected ? "全不选" : "全选") { toggleSelectAll() }
@@ -400,21 +434,40 @@ struct MainView: View {
                       ? "取消勾选这个文件夹里所有可导入的笔记"
                       : "勾选这个文件夹里所有可导入的笔记")
 
+            if !importSelection.isEmpty {
+                Button {
+                    openImportApproval()
+                } label: {
+                    // 不放图标：中栏只有三百多点宽，加了图标说明文字就会被挤掉。
+                    Text(importButtonTitle)
+                }
+                .controlSize(.small)
+                .dsPrimaryButton()
+                .disabled(!canImport)
+                .help("先看变更计划，确认后才写进备忘录")
+                .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
+            }
+
             Text(selectionSummary)
                 .font(DS.Fonts.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
 
             Spacer(minLength: 0)
         }
         .padding(.horizontal, DS.Space.l)
         .padding(.vertical, DS.Space.s)
+        .animation(.easeOut(duration: 0.16), value: importSelection.isEmpty)
     }
 
     private var selectionSummary: String {
         if importSelection.isEmpty {
-            return "共 \(currentNotes.count) 条 · 勾选后点左栏的「导入选中项」"
+            return "共 \(currentNotes.count) 条 · 勾选笔记后可导入"
         }
-        return "共 \(currentNotes.count) 条 · 已勾选 \(importSelection.count) 条"
+        // 有勾选时只留计数：按钮自己已经带了「（N）」，
+        // 再写「共 27 条 · 已勾选 1 条」会被中栏的宽度挤成省略号。
+        return "已勾选 \(importSelection.count) 条"
     }
 
     @ViewBuilder
@@ -463,7 +516,12 @@ struct MainView: View {
                         // 「显示原文」放在标题行右下角：它是这条笔记的属性，
                         // 不属于正文内容，放在正文顶部会和第一段文字抢视线。
                         // 只有被 AI 改过的笔记才有"原文"这个概念，其它笔记不显示。
-                        if note.aiModified {
+                        //
+                        // **判据用 `noteAIModified` 这个界面状态，不用 `note.aiModified`。**
+                        // 后者是列表数据里的快照：用户点「以此为准」后内存里的标记已经清了，
+                        // 但快照要等下一次 reloadFromCache 才更新，中间那几帧按钮还在，
+                        // 显示成「显示当前」——点下去什么也不会发生。
+                        if noteAIModified {
                             Button(showingOriginal ? "显示当前" : "显示原文") {
                                 if showingOriginal {
                                     showingOriginal = false
@@ -515,26 +573,17 @@ struct MainView: View {
             aiResizeHandle
 
             // **下半：AI，固定在底部，高度随内容变化。**
-            // 空时只有一行输入框；有消息后长高；拖拽悬停时再临时加高。
+            // 空时只有一行输入框；有消息后长高。
             aiSection(note)
                 .frame(height: aiPanelHeight)
-                // **暂时摘掉 dropDestination（排查输入框点不进去）。**
-                // 它会把整块 AI 区变成投放目标，可能拦截鼠标点击——
-                // 笔记区之前就是这个原因导致 hover/选字失效。
-                // 若确认是它，改成只覆盖消息区、不覆盖输入区的投放区。
-                .overlay { dropOverlay(for: .ai) }
         }
         .navigationTitle(note.title)
-        // 底部居中的临时提示：写入、撤销这类"刚发生"的反馈放这里，
+        // 底部居中的临时提示：写入、自动保存、撤销这类"刚发生"的反馈放这里，
         // 不打断操作，也不占用正文位置。
         .overlay(alignment: .bottom) { toastOverlay }
         // id 绑定到笔记本身：切换笔记时重新从缓存读一次，同一笔记不会重复读。
         .task(id: note.id) {
-            // 换了笔记，上一条的 AI 输入与预览/结果都不该带过来。
-            aiState = .idle
-            aiInstruction = ""
-            aiRunningNoteId = nil
-            // 对话也要清空：上一轮的上下文与这条笔记无关，
+            // 对话要清空：上一轮的上下文与这条笔记无关，
             // 留着会让模型把 A 笔记的内容当成 B 笔记的背景。
             chat.clear()
             // 原文视图同理，不能带着上一条笔记的状态
@@ -656,12 +705,79 @@ struct MainView: View {
     /// 而写备忘录走 AppleScript，会直接覆盖原版，失败了也不好恢复。
     /// 真正写回走显式入口（导入 / AI 写回）。
     private func scheduleBodySave(_ html: String, note: CachedNote) {
+        // 内容与已落盘的一致 = 这次不是编辑（最常见的是 `loadBody` 刚把正文塞进来）。
+        // 少了这个判断，每打开一条笔记都会先写一次盘、再弹一次「已保存」。
+        guard html != persistedHTML else { return }
+
         bodySaveTask?.cancel()
         bodySaveTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 600_000_000)
             guard !Task.isCancelled else { return }
-            try? cache.saveContent(CachedNoteContent(html: html, images: noteImages), for: note.id)
+            await persistBody(html, note: note)
         }
+    }
+
+    /// 把正文写进本地缓存，成功就弹一个很轻的「已自动保存」。
+    ///
+    /// 失败**不能吞**：磁盘满、权限被改这类问题，用户以为存上了其实没有，
+    /// 关掉软件就真的丢了。所以失败也走气泡，只是换颜色、留更久。
+    @MainActor
+    private func persistBody(_ html: String, note: CachedNote) async {
+        do {
+            // 只写正文：编辑期间图片不会变，走 `saveContent` 会把每条图重新写一遍。
+            try cache.saveHTML(html, for: note.id)
+            // 落盘那一刻用户可能已经切到别的笔记了。内容写对了（note 是旧的、路径也是旧的），
+            // 但「已落盘的正文」这个游标属于**当前显示的那条**，不能拿旧笔记的内容去覆盖它，
+            // 否则新笔记第一次编辑会被误判成"没改过"而跳过保存。
+            guard selectedNoteID == note.id else { return }
+            persistedHTML = html
+            announceAutoSave()
+        } catch {
+            showToast("自动保存失败：\(error.localizedDescription)",
+                      icon: "exclamationmark.triangle.fill",
+                      tint: DS.Status.bad,
+                      duration: 6)
+        }
+    }
+
+    /// 弹出「已自动保存」。
+    ///
+    /// 两处克制：
+    /// 1. **限流 2.5 秒**——连续打字时保存是每 600ms 一次，每次都弹会像故障；
+    /// 2. **不顶掉带撤销的气泡**——那个气泡里有一个用户可能正要点的按钮，
+    ///    被"已保存"盖掉等于把撤销入口抢走了。
+    private func announceAutoSave() {
+        if let toast, toast.undo != nil { return }
+
+        let now = Date()
+        guard now.timeIntervalSince(lastAutoSaveToast) > 2.5 else { return }
+        lastAutoSaveToast = now
+        showToast("已自动保存到本地",
+                  icon: "checkmark.circle",
+                  tint: DS.Status.ok,
+                  duration: 1.6)
+    }
+
+    /// ⌘S：跳过防抖，立刻落盘。没有改动时也给一句"已是最新"，否则用户会以为没生效。
+    private func flushBodySave() {
+        // 原文视图里的改动**不落盘**——它有专门的落点（「以此为准」）。
+        // 这里如果静默保存当前正文，用户会以为改的是原文，其实什么都没发生。
+        guard !showingOriginal else {
+            showToast("原文改动请点「以此为准」写回正文",
+                      icon: "info.circle",
+                      tint: DS.Palette.accent,
+                      duration: 3.5)
+            return
+        }
+        guard let note = selectedNote, !noteHTML.isEmpty else { return }
+        bodySaveTask?.cancel()
+
+        if noteHTML == persistedHTML {
+            showToast("已是最新版本", icon: "checkmark.circle", duration: 1.4)
+            return
+        }
+        let html = noteHTML
+        Task { @MainActor in await persistBody(html, note: note) }
     }
 
     /// 把 AI 的一条回复写成这条笔记的正文。
@@ -705,7 +821,6 @@ struct MainView: View {
                     }
                 }
             } catch {
-                print("[MainView] 写入笔记失败：\(error.localizedDescription)")
                 showToast("写入失败：\(error.localizedDescription)")
             }
         }
@@ -785,9 +900,13 @@ struct MainView: View {
             if note.hasBody {
                 noteBodyError = "本地缓存里找不到这条笔记的正文。可以点一次「拉取」重新下载。"
             }
+            persistedHTML = ""
             return
         }
         noteHTML = content.html
+        // 刚从盘上读回来的内容 = 已落盘的内容。之后的 `onChange(of: noteHTML)`
+        // 拿它一比就知道这次是"载入"还是"编辑"。
+        persistedHTML = content.html
         noteBlocks = NoteHTML.parse(content.html)
         noteImages = content.images
     }
@@ -874,35 +993,26 @@ struct MainView: View {
 
     /// 底部居中的临时提示气泡。
     ///
-    /// 用气泡而不是 alert：这类反馈（写入了、撤销了）不需要用户确认，
-    /// 弹窗反而要额外点一下才能继续干活。4 秒自动消失，带撤销时留够操作时间。
+    /// 样式的实现在设计系统里（`DSToastBubble`），这里只负责"什么时候出现、什么时候走"。
+    /// 4 秒自动消失，带撤销时留够操作时间。
     @ViewBuilder
     private var toastOverlay: some View {
         if let toast {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(DS.Status.ok)
-
-                Text(toast.text)
-                    .font(DS.Fonts.label)
-
-                if let undo = toast.undo {
-                    Button("撤销") {
-                        undo()
+            DSToastBubble(
+                text: toast.text,
+                icon: toast.icon,
+                tint: toast.tint,
+                undo: toast.undo.map { action in
+                    {
+                        action()
                         withAnimation { self.toast = nil }
                     }
-                    .buttonStyle(.link)
-                    .font(DS.Fonts.label)
                 }
-            }
-            .padding(.horizontal, DS.Space.l)
-            .padding(.vertical, DS.Space.s)
-            .background(.regularMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(DS.Palette.stroke, lineWidth: 1))
-            .padding(.bottom, DS.Space.xl)
+            )
+            // 浮在 AI 输入栏**上方**：贴着窗口底部会正好压在输入框上，
+            // 既挡住用户正在打的字，也让气泡看起来像输入框的一部分。
+            .padding(.bottom, aiPanelHeight + DS.Space.m)
             .transition(.move(edge: .bottom).combined(with: .opacity))
-            .allowsHitTesting(true)
         }
     }
 
@@ -926,8 +1036,18 @@ struct MainView: View {
                 // 清掉 aiModified 之后，「显示原文」按钮和「AI 已重构」标记都会消失——
                 // 那份原文此刻已经等于正文，继续留着入口只会让人困惑。
                 noteAI.clearAIModified(noteId: note.id)
+                noteAIModified = false
                 showingOriginal = false
-                loadBody(note)
+                // **列表也要一起刷新。**
+                // 「AI 已重构」小标读的是 `pull.notes` 里的快照，光清缓存不会让它变——
+                // 用户会看到详情栏按钮没了、列表里还挂着标记，像是没生效。
+                await pull.reloadFromCache()
+                afterCacheChanged()
+                if let refreshed = pull.notes.first(where: { $0.id == note.id }) {
+                    loadBody(refreshed)
+                } else {
+                    loadBody(note)
+                }
                 chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
 
                 showToast("已用原文替换当前正文") { [previous] in
@@ -936,32 +1056,46 @@ struct MainView: View {
                             NoteAIResult(html: previous, summary: "撤销恢复"),
                             toNoteId: note.id
                         )
-                        loadBody(note)
+                        await pull.reloadFromCache()
+                        afterCacheChanged()
+                        if let restored = pull.notes.first(where: { $0.id == note.id }) {
+                            loadBody(restored)
+                        }
                         chat.noteContext = AIChatSession.NoteContext(title: note.title, html: noteHTML)
                     }
                 }
             } catch {
-                showToast("恢复失败：\(error.localizedDescription)")
+                showToast("恢复失败：\(error.localizedDescription)",
+                          icon: "exclamationmark.triangle.fill",
+                          tint: DS.Status.bad)
             }
         }
     }
 
     /// 显示提示气泡。`undo` 为 nil 时只是一个确认。
-    private func showToast(_ text: String, undo: (() -> Void)? = nil) {
-        let state = ToastState(text: text, undo: undo)
+    private func showToast(_ text: String,
+                           icon: String = "checkmark.circle.fill",
+                           tint: Color = DS.Status.ok,
+                           duration: Double = 4,
+                           undo: (() -> Void)? = nil) {
+        let state = ToastState(text: text,
+                               icon: icon,
+                               tint: tint,
+                               duration: duration,
+                               undo: undo)
         withAnimation(.easeOut(duration: 0.18)) { toast = state }
 
         // 只让"最新那条"负责关闭：否则连续两次操作时，
         // 第一条的定时器会把第二条刚弹出来的气泡提前收掉。
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             if toast?.id == state.id {
                 withAnimation(.easeIn(duration: 0.15)) { toast = nil }
             }
         }
     }
 
-    // MARK: - 拖拽
+    // MARK: - 面板高度
 
     /// AI 区的高度：跟着内容走，不再固定占一块。
     ///
@@ -986,212 +1120,7 @@ struct MainView: View {
             // 现在给到 340，等于 7 条左右的余量；再多就靠区里自己滚。
             height += min(CGFloat(chat.messages.count) * 46, 340)
         }
-        if hoveredZone == .ai { height += 40 }
         return height
-    }
-
-    /// 拖拽提示的两层渐变。
-    ///
-    /// **第一层**：一旦开始拖拽（指针进入任一区域），两个区域同时亮起浅色——
-    /// 意思是"这里和那里都能放"。**没有拖拽时一点都不画**，界面保持干净。
-    /// **第二层**：指针停在哪，哪个区域加深并显示文字。
-    ///
-    /// 用「任一区域 targeted」代表"正在拖拽"，是因为拖进窗口必然落在两个区域之一；
-    /// 窗口外的情况本来也不需要提示。
-    @ViewBuilder
-    private func dropOverlay(for zone: DropZone) -> some View {
-        if let hovered = hoveredZone {
-            let active = (hovered == zone)
-            ZStack {
-                LinearGradient(
-                    colors: [DS.Palette.accent.opacity(active ? 0.22 : 0.06),
-                             DS.Palette.accent.opacity(active ? 0.02 : 0.0)],
-                    startPoint: .top,
-                    endPoint: .bottom)
-
-                if active {
-                    Text(zone == .note ? "松手，添加到笔记素材" : "松手，交给 AI 分析")
-                        .font(DS.Fonts.rowTitle)
-                        .foregroundStyle(DS.Palette.accent)
-                        .padding(.horizontal, DS.Space.l)
-                        .padding(.vertical, DS.Space.s)
-                        .background(.regularMaterial, in: Capsule())
-                }
-            }
-            .allowsHitTesting(false)
-            .transition(.opacity)
-        }
-    }
-
-    /// 处理拖入的文件。
-    ///
-    /// 两个区域最终都汇入 `chat.attach`——区别在提示语和用户心智：
-    /// 拖到笔记区是「这条笔记的素材」，拖到对话区是「让 AI 处理这份东西」。
-    /// 但素材同样要进对话才能真正被 AI 用起来；如果分成两套队列，
-    /// 用户反而不知道自己刚拖的文件去了哪。
-    private func handleDrop(_ urls: [URL], into zone: DropZone) -> Bool {
-        hoveredZone = nil
-        let items = urls.compactMap { AttachmentReader.make(from: $0) }
-        guard !items.isEmpty else { return false }
-        chat.attach(items)
-        return true
-    }
-
-    /// 拖拽悬停时的渐变提示（已并入 `dropOverlay`）。
-
-    /// AI 区域的状态反馈。每个态都给出明确出口，失败也不吞错误。
-    @ViewBuilder
-    private func aiFeedback(_ note: CachedNote) -> some View {
-        switch aiState {
-        case .idle:
-            EmptyView()
-
-        case .running:
-            DSStatusBar(icon: "sparkles",
-                        tint: DS.Palette.accent,
-                        title: "正在用 AI 重构…",
-                        detail: "请求已经发出，请稍候。",
-                        busy: true)
-
-        case .failed(let message):
-            DSStatusBar(icon: "exclamationmark.triangle.fill",
-                        tint: DS.Status.bad,
-                        title: "重构失败",
-                        detail: message)
-
-        case .applied(let message):
-            DSStatusBar(icon: "checkmark.circle.fill",
-                        tint: DS.Status.ok,
-                        title: message,
-                        detail: "已写入备忘录，并标记为不会被导入覆盖。")
-
-        case .preview(let preview):
-            aiPreview(preview, note: note)
-        }
-    }
-
-    /// 重构预览：先给用户看，确认了才落盘。
-    private func aiPreview(_ preview: AIRewritePreview, note: CachedNote) -> some View {
-        VStack(alignment: .leading, spacing: DS.Space.s) {
-            Text("重构预览（尚未写入）").font(DS.Fonts.cardTitle)
-
-            Text(preview.result.summary)
-                .font(DS.Fonts.label)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Divider()
-
-            // 复用现成的 HTML 渲染。AI 结果按约束不含图片，所以图片表给空。
-            NoteHTMLView(blocks: preview.blocks, images: [:])
-
-            HStack(spacing: DS.Space.s) {
-                Button("写入备忘录") { applyAIResult(preview, to: note) }
-                    .buttonStyle(.borderedProminent)
-                Button("放弃") { aiState = .idle }
-            }
-        }
-        .padding(DS.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DS.Palette.tint(DS.Palette.accent),
-                    in: RoundedRectangle(cornerRadius: DS.Radius.m))
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.Radius.m)
-                .stroke(DS.Palette.accent.opacity(0.25), lineWidth: DS.Optical.hairline)
-        )
-    }
-
-    // MARK: - AI 行为
-
-    private func runAIRewrite(_ note: CachedNote) {
-        guard !aiIsRunning else { return }
-        aiState = .running
-
-        let instruction = aiInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        let images = Self.aiImages(from: noteImages)
-        let body = noteHTML
-        let title = note.title
-        let noteId = note.id
-        aiRunningNoteId = noteId
-
-        Task {
-            do {
-                let result = try await noteAI.rewriteNote(noteId: noteId,
-                                                          title: title,
-                                                          body: body,
-                                                          images: images,
-                                                          instruction: instruction.isEmpty ? nil : instruction)
-                // 用户在等待期间切到了别的笔记 → 这次结果作废，别把预览贴错地方。
-                guard aiRunningNoteId == noteId else { return }
-                // 解析放在拿到结果时做一次并随预览一起存，避免每次重绘都重解析。
-                let blocks = NoteHTML.parse(result.html)
-                aiState = .preview(AIRewritePreview(result: result, blocks: blocks))
-            } catch {
-                // 错误一律如实显示，不因「可能已切走」而吞掉。
-                aiState = .failed(error.localizedDescription)
-            }
-        }
-    }
-
-    private func applyAIResult(_ preview: AIRewritePreview, to note: CachedNote) {
-        guard !aiIsRunning else { return }
-        aiState = .running
-        let noteId = note.id
-        aiRunningNoteId = noteId
-
-        Task {
-            do {
-                try await noteAI.applyResult(preview.result, toNoteId: noteId)
-                guard aiRunningNoteId == noteId else { return }
-                noteAIModified = true
-                // 写回之后以缓存为准刷新：重读一次索引与正文，同样**不联网**。
-                await pull.reloadFromCache()
-                afterCacheChanged()
-                if let refreshed = pull.notes.first(where: { $0.id == noteId }) {
-                    loadBody(refreshed)
-                }
-                aiState = .applied("已写入备忘录")
-            } catch {
-                // 写入失败必须让用户看到，不吞。
-                aiState = .failed(error.localizedDescription)
-            }
-        }
-    }
-
-    private var aiIsRunning: Bool {
-        if case .running = aiState { return true }
-        return false
-    }
-
-    /// 主按钮能否点击：配置可用、没有正在跑的任务、正文已加载出来、且有内容可处理。
-    ///
-    /// 还要求 `hasBody == true`（正文与云端一致）：正文不是最新版本时，
-    /// 重构结果写回去等于拿旧内容盖掉更新的版本，宁可先禁用。
-    private var aiCanRun: Bool {
-        guard aiProvider.config.isUsable,
-              !aiIsRunning,
-              noteBodyError == nil,
-              selectedNote?.hasBody == true else { return false }
-        let hasText = !noteHTML.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasText || !noteImages.isEmpty
-    }
-
-    /// 把缓存里的图片字节包成发给模型的形态，并按魔数补上 MIME。
-    private static func aiImages(from images: [String: Data]) -> [AIImage] {
-        images.values.map { AIImage(data: $0, mimeType: imageMimeType($0)) }
-    }
-
-    /// 从字节头判断图片类型。服务端通常按内容探测，但显式声明更稳；判不出来时回落 PNG。
-    private static func imageMimeType(_ data: Data) -> String {
-        if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "image/png" }
-        if data.starts(with: [0xFF, 0xD8, 0xFF]) { return "image/jpeg" }
-        if data.starts(with: [0x47, 0x49, 0x46, 0x38]) { return "image/gif" }
-        if data.count >= 12,
-           data.starts(with: [0x52, 0x49, 0x46, 0x46]),
-           data[8] == 0x57, data[9] == 0x45, data[10] == 0x42, data[11] == 0x50 {
-            return "image/webp"
-        }
-        return "image/png"
     }
 
     // MARK: - 引导页（未选中任何笔记时）
@@ -1274,9 +1203,12 @@ struct MainView: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .disabled(pull.isRunning || importer.isRunning || onboarding.cookie == nil)
-                    Button("导入选中项") { openImportApproval() }
-                        .controlSize(.small)
-                        .disabled(!canImport)
+                    // 与中栏同一个规则：有勾选才出现导入入口，没有就只留说明。
+                    if !importSelection.isEmpty {
+                        Button("导入选中项（\(importSelection.count)）") { openImportApproval() }
+                            .controlSize(.small)
+                            .disabled(!canImport)
+                    }
                 }
             }
         }
@@ -1468,7 +1400,7 @@ struct MainView: View {
         if progress.total > 0 {
             return "已处理 \(progress.completed)/\(progress.total) 条"
         }
-        return "在中栏勾选要写入的笔记，然后点「导入选中项」。"
+        return "在中栏勾选要写入的笔记，然后点中栏顶部的「导入选中项」。"
     }
 
     private var importStatusIcon: String {
@@ -1517,6 +1449,12 @@ struct MainView: View {
 private struct NoteRow: View {
     let note: CachedNote
     @Binding var isChecked: Bool
+    /// 「AI 已重构」小标。
+    ///
+    /// 由列表传入而不是自己读 `note.aiModified`：用户点「以此为准」后
+    /// 内存里的标记已经清了，而 `note` 是上一轮拉取的快照——
+    /// 只读快照会让小标一直挂着，跟详情栏的按钮状态自相矛盾。
+    let isAIModified: Bool
 
     /// 唯一的硬条件是「有正文」。已导入的笔记**也能勾**——
     /// 那表示「按小米侧的版本覆盖更新」，导入前会逐条让用户确认。
@@ -1529,7 +1467,7 @@ private struct NoteRow: View {
                 ? "取消勾选"
                 : "已经导入过——勾选后会先出变更计划，覆盖更新要你逐条确认"
         }
-        return isChecked ? "取消勾选" : "勾选后点左栏的「导入选中项」"
+        return isChecked ? "取消勾选" : "勾选后点列表顶部的「导入选中项」"
     }
 
     var body: some View {
@@ -1549,7 +1487,7 @@ private struct NoteRow: View {
                     if note.imported {
                         NoteBadge(text: "已导入", tint: DS.Status.ok)
                     }
-                    if note.aiModified {
+                    if isAIModified {
                         NoteBadge(text: "AI 已重构", tint: DS.Palette.accent)
                     }
                     if !note.hasBody {

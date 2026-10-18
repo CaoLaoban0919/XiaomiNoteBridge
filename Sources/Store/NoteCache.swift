@@ -77,11 +77,18 @@ final class NoteCache: NoteCacheProtocol {
     }
 
     func saveContent(_ content: CachedNoteContent, for noteId: String) throws {
-        try writeFile(Data(content.html.utf8),
-                      to: bodiesURL.appendingPathComponent(Self.fileName(noteId) + ".html"))
+        try saveHTML(content.html, for: noteId)
         for (fileId, bytes) in content.images {
             try writeFile(bytes, to: imagesURL.appendingPathComponent(Self.fileName(fileId)))
         }
+    }
+
+    /// 只写正文文件。
+    ///
+    /// 编辑落盘走这条，避免每次敲键都重写一遍图片。
+    func saveHTML(_ html: String, for noteId: String) throws {
+        try writeFile(Data(html.utf8),
+                      to: bodiesURL.appendingPathComponent(Self.fileName(noteId) + ".html"))
     }
 
     /// 保存「AI 改写前的原文」，**只在不存在时写一次**。

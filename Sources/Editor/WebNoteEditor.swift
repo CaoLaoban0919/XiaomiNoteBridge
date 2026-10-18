@@ -307,15 +307,16 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
             break
         }
 
+        if let tag = Self.blockTag(for: command) {
+            webView.evaluateJavaScript(Self.setBlockScript(tag), completionHandler: nil)
+            return
+        }
+
         let js: String
         switch command {
         case .bold: js = "document.execCommand('bold')"
         case .italic: js = "document.execCommand('italic')"
         case .underline: js = "document.execCommand('underline')"
-        case .heading1: js = "document.execCommand('formatBlock', false, 'h1')"
-        case .heading2: js = "document.execCommand('formatBlock', false, 'h2')"
-        case .heading3: js = "document.execCommand('formatBlock', false, 'h3')"
-        case .paragraph: js = "document.execCommand('formatBlock', false, 'p')"
         case .bulletList: js = "document.execCommand('insertUnorderedList')"
         case .orderedList: js = "document.execCommand('insertOrderedList')"
         case .undo: js = "document.execCommand('undo')"
@@ -323,6 +324,60 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
         default: return
         }
         webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    /// 标题档位 → 标签名。
+    private static func blockTag(for command: NoteEditorCommand) -> String? {
+        switch command {
+        case .heading1: return "h1"
+        case .heading2: return "h2"
+        case .heading3: return "h3"
+        case .paragraph: return "p"
+        default: return nil
+        }
+    }
+
+    /// 把当前块换成指定标签。
+    ///
+    /// **不能只用 `execCommand('formatBlock')`。**
+    /// 它在 WebKit 里从 `h1`/`h2` 切回 `p` 时经常"返回成功但 DOM 没动"——
+    /// 表现就是「大 → 中」能切，「中 → 小」卡住，字号只能一路往下走。
+    /// 所以先走原生（能进撤销栈），再用 `queryCommandValue` 核对；
+    /// 核对不通过就手动替换标签兜底。
+    private static func setBlockScript(_ tag: String) -> String {
+        """
+        (function(){
+            var target = '\(tag)';
+            var sel = window.getSelection();
+            if (!sel || sel.rangeCount === 0) return;
+
+            // 1. 先试原生路径（可进撤销栈）
+            try { document.execCommand('formatBlock', false, target); } catch (e) {}
+
+            // 2. 核对实际结果：WebKit 有时报成功但没改
+            var actual = '';
+            try { actual = (document.queryCommandValue('formatBlock') || '').toLowerCase(); } catch (e) {}
+            if (actual === target) return;
+
+            // 3. 兜底：手动替换最近的块级祖先
+            var node = sel.anchorNode;
+            while (node && node.nodeType !== 1) { node = node.parentNode; }
+            var blocks = ['H1','H2','H3','H4','H5','H6','P','DIV','LI','BLOCKQUOTE'];
+            while (node && blocks.indexOf(node.tagName) === -1) { node = node.parentNode; }
+            if (!node || node === document.body || !node.parentNode) return;
+
+            var el = document.createElement(target);
+            el.innerHTML = node.innerHTML;
+            node.parentNode.replaceChild(el, node);
+
+            // 光标落到新块末尾，继续打字不会跳回旧块
+            var range = document.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+        })();
+        """
     }
 
     /// 选一张本地图片插到光标处。
