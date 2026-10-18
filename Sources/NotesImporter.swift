@@ -1,13 +1,5 @@
 import Foundation
 
-// MARK: - 数据结构
-
-/// 「备忘录」里的一条笔记在 Swift 侧的轻量投影。
-///
-/// 只保留迁移流程真正需要的字段：
-/// - `id` 是 AppleScript `id of note` 返回的稳定标识（形如 `x-coredata://…`），
-///   也是后续「通道二」覆盖更新时唯一定位一条笔记的钥匙，务必原样保存；
-/// - `bodyLength` 是 HTML 源码的字符数（含标签），不是可见文字长度，仅用于粗筛变化。
 struct AppleNote: Sendable {
     var id: String
     var name: String
@@ -17,33 +9,25 @@ struct AppleNote: Sendable {
     var bodyLength: Int
 }
 
-/// 「备忘录」里的一个文件夹在 Swift 侧的轻量投影。
-///
-/// `id` 取自 AppleScript `id of folder`（形如 `x-coredata://…/ICFolder/p394`）。
-/// 复用已有文件夹时靠 `name` 匹配，新建时返回的 `id` 可用于后续定位。
 struct AppleFolder: Sendable {
     var id: String
     var name: String
 }
 
-// MARK: - 错误
-
-/// 桥接层对外暴露的错误。把 AppleScript 抛出的原始错误码翻译成有意义的中文提示。
 enum NotesImportError: LocalizedError {
-    /// 没有「备忘录」的自动化权限（AppleScript 错误码 -1743）
+
     case notAuthorized
-    /// 「备忘录」进程没在运行（AppleScript 错误码 -600）
+
     case notesNotRunning
-    /// 找不到对象：文件夹或笔记 id 不存在（AppleScript 错误码 -1728）。
-    /// 关联值是 AppleScript 的原始报错文本，便于定位到底是哪一步。
+
     case objectNotFound(String)
-    /// 该版本「备忘录」不支持这个 AppleScript 命令（错误码 -1708）
+
     case commandNotHandled(String)
-    /// 返回值无法解析（例如计数结果不是整数）
+
     case invalidData(String)
-    /// 临时文件读写失败
+
     case tempFileIO(String)
-    /// 其它未分类的脚本错误
+
     case scriptError(String)
 
     var errorDescription: String? {
@@ -66,36 +50,12 @@ enum NotesImportError: LocalizedError {
     }
 }
 
-// MARK: - 导入器
-
-/// 与「备忘录」交互的读/写封装。
-///
-/// 职责边界：
-/// - 所有脚本一律交给 `NotesBridge.run(_:)` 在后台线程执行，本类不自己起 `Process`；
-/// - 本类不做 UI，也不 import SwiftUI；纯逻辑，方便被同步引擎调用。
-///
-/// 两条迁移通道的分工：
-/// - **通道一（新笔记）**：生成 `.enex` 交给「备忘录」导入，本类不参与写入；
-///   但导入后需要 `countNotes` / `listNotes` / `findNoteIDsByTitle` 回读配对，
-///   建立「小米 noteId ↔ 备忘录 id」的映射。
-/// - **通道二（已导入后被改过的笔记）**：用 `setBody(id:html:)` 直接覆盖正文。
-///
-/// ⚠️ `setBody` 与 `createNote` 会真实修改用户的「备忘录」数据，其余方法只读。
 enum NotesImporter {
 
-    // MARK: 分隔符
-
-    /// 字段分隔符：ASCII Unit Separator (U+001F)。
-    /// 用它而不是逗号，是因为标题/文件夹名里可能含逗号，会撞车；US 几乎不可能出现在正文里。
     private static let fieldSeparator: Character = "\u{1F}"
 
-    /// 记录分隔符：ASCII Record Separator (U+001E)。
-    /// 一条笔记一行用 US 拼字段，多条笔记之间用 RS 连接，双向都不会歧义。
     private static let recordSeparator: Character = "\u{1E}"
 
-    // MARK: 日期
-
-    /// 解析 AppleScript 端拼出来的 `yyyy-MM-dd'T'HH:mm:ss`（本地时区、无时区后缀）。
     private static let isoLocalFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -104,10 +64,6 @@ enum NotesImporter {
         return f
     }()
 
-    // MARK: - 只读：文件夹
-
-    /// 列出「备忘录」里所有文件夹的名字（跨所有账户）。
-    /// 只读，不会改动任何数据。
     static func listFolders() async throws -> [String] {
         let script = """
         set US to (character id 31)
@@ -126,14 +82,6 @@ enum NotesImporter {
             .map(String.init)
     }
 
-    /// 列出「备忘录」里所有文件夹及其 id（跨所有账户）。
-    ///
-    /// 与 `listFolders()` 的区别只有一个：多带回 `id of folder`。
-    /// 保留小米文件夹结构时，先靠名字匹配复用已有文件夹，只有确实不存在才新建，
-    /// 这样反复同步也不会把同名文件夹越建越多。
-    ///
-    /// 记录格式固定为 `id US name RS`；`name` 为空的记录（异常情况）直接跳过。
-    /// 只读，不会改动任何数据。
     static func listFoldersWithIDs() async throws -> [AppleFolder] {
         let script = """
         set US to (character id 31)
@@ -167,15 +115,6 @@ enum NotesImporter {
         return result
     }
 
-    // MARK: - 只读：计数（用于「数数确认」）
-
-    /// 数一数笔记条数。
-    ///
-    /// - Parameter folder: 传文件夹名只数该文件夹；传 `nil` 数全部笔记。
-    /// - Returns: 笔记条数。
-    ///
-    /// 迁移流程用它做「导入前后数一遍，涨够了才算成功」的验收判断。
-    /// 只读，不会改动任何数据。
     static func countNotes(inFolder folder: String?) async throws -> Int {
         let script: String
         if let folder {
@@ -198,19 +137,6 @@ enum NotesImporter {
         return n
     }
 
-    // MARK: - 只读：列出笔记
-
-    /// 列出笔记及其内部 id。
-    ///
-    /// - Parameters:
-    ///   - folder: 传文件夹名只列该文件夹；传 `nil` 列全部笔记。
-    ///   - includeBodyLength: 是否顺便取正文长度。**默认为 false，这一点很重要**：
-    ///     取长度要求 AppleScript 逐条读取完整 `body`，而 AppleScript 的属性访问很慢，
-    ///     上千条笔记会跑到几十秒。建立映射、回读配对都只需要 id 和标题，
-    ///     所以默认不取；只有确实需要粗筛变化时才打开。
-    /// - Returns: `AppleNote` 数组，其中 `id` 取自 AppleScript `id of note`，是后续定位笔记的唯一稳定标识。
-    ///
-    /// 只读，不会改动任何数据。
     static func listNotes(inFolder folder: String?,
                           includeBodyLength: Bool = false) async throws -> [AppleNote] {
         let script = makeListScript(folderFilter: folder,
@@ -220,10 +146,6 @@ enum NotesImporter {
         return parseAppleNotes(raw)
     }
 
-    /// 按标题精确查找笔记，用于导入后回读配对。
-    ///
-    /// 「备忘录」的 `name` 由笔记正文首行推导而来，所以这里对 `name` 做区分大小写的精确比较。
-    /// `includeBodyLength` 默认关闭，原因同 `listNotes`。只读，不会改动任何数据。
     static func findNoteIDsByTitle(_ title: String,
                                    inFolder folder: String? = nil,
                                    includeBodyLength: Bool = false) async throws -> [AppleNote] {
@@ -234,14 +156,6 @@ enum NotesImporter {
         return parseAppleNotes(raw)
     }
 
-    // MARK: - 只读：正文
-
-    /// 取某条笔记的正文（HTML）。
-    ///
-    /// - Parameter id: 笔记的内部 id（形如 `x-coredata://…`）。
-    ///
-    /// 注意：返回值会被 `NotesBridge.run` 去掉首尾空白与换行，对 HTML 而言无实质影响。
-    /// 只读，不会改动任何数据。
     static func noteBody(id: String) async throws -> String {
         let script = """
         tell application "Notes"
@@ -251,19 +165,6 @@ enum NotesImporter {
         return try await runClassified(script, context: "读取笔记正文")
     }
 
-    // MARK: - 写操作（会修改用户的备忘录）
-
-    /// ⚠️ **写操作**：直接覆盖「备忘录」中指定笔记的正文，不可撤销。
-    ///
-    /// 这是「通道二」的核心——已经导入过、但在小米端被修改过的笔记，用这个方式原地更新。
-    /// 只允许对已经建立映射、且确认过归属的笔记 id 调用；不要拿它去改用户手写的笔记。
-    ///
-    /// 实现上把 HTML 先写到临时文件、再由 AppleScript `read` 读入：正文往往很长，
-    /// 直接嵌进 osascript 命令行参数会撞长度上限，走文件可以完全绕开这个问题。
-    ///
-    /// - Parameters:
-    ///   - id: 目标笔记的内部 id。
-    ///   - html: 新的正文，HTML 片段。
     static func setBody(id: String, html: String) async throws {
         let tmp = try writeTempHTML(html)
         defer { try? FileManager.default.removeItem(at: tmp) }
@@ -278,17 +179,6 @@ enum NotesImporter {
         _ = try await runClassified(script, context: "覆盖笔记正文")
     }
 
-    /// ⚠️ **写操作**：往已有笔记里插入图片附件，返回每个附件的 `cid:` 引用。
-    ///
-    /// 走的是 Notes 脚本字典里那个**隐藏的** `contents` 属性。字典原文的注释写着：
-    /// "We do this to facilitate creating an attachment like this:
-    /// `make new attachment with data myFile`" —— 藏起来正是为了支持这种用法。
-    ///
-    /// 返回的 `cid:` 可以直接写进正文 HTML 的 `<img src="cid:...">`，
-    /// 图片才会落在指定位置；不引用的话，附件会挂在笔记末尾。
-    ///
-    /// - Parameter fileURLs: 本地图片文件路径（data URI 必须先落成临时文件）。
-    /// - Returns: 与传入顺序一一对应的 `cid:` 字符串；某个失败则该项为空。
     static func insertImages(id: String, fileURLs: [URL]) async throws -> [String] {
         guard !fileURLs.isEmpty else { return [] }
 
@@ -308,17 +198,6 @@ enum NotesImporter {
         return cids
     }
 
-    /// ⚠️ **写操作**：在「备忘录」中新建一个文件夹，不可撤销（本函数不提供删除）。
-    ///
-    /// - Parameter name: 文件夹名。
-    /// - Returns: 新文件夹的 id。
-    ///
-    /// **幂等**：若已存在同名文件夹，「备忘录」会报错 `重复的文件夹名称 (-10000)`；
-    /// 此时不抛错，而是回查该文件夹的 id 直接复用。这样调用方不必先查后建，
-    /// 也天然避免了同名文件夹越建越多。
-    ///
-    /// 实测（2026-10-15, macOS 27）：新建的文件夹落在「备忘录」账户根层，
-    /// 与 ENEX 导入笔记所去的「导入的备忘录」同属一个账户。
     static func createFolder(named name: String) async throws -> String {
         let script = """
         tell application "Notes"
@@ -341,15 +220,6 @@ enum NotesImporter {
         }
     }
 
-    /// ⚠️ **写操作**：把「备忘录」中的一条笔记移动到指定文件夹，不可撤销。
-    ///
-    /// - Parameters:
-    ///   - id: 目标笔记的内部 id（形如 `x-coredata://…/ICNote/pNNN`）。用 id 定位而非标题，
-    ///     避免同名笔记歧义。
-    ///   - folder: 目标文件夹名。需已存在（先用 `createFolder(named:)` 确保）。
-    ///
-    /// 实测（2026-10-15, macOS 27）：移动**不会改变笔记的 id**，也**不影响正文**，
-    /// 因此可以在配对建立映射之后放心移动。
     static func moveNote(id: String, toFolder folder: String) async throws {
         let script = """
         tell application "Notes"
@@ -359,14 +229,6 @@ enum NotesImporter {
         _ = try await runClassified(script, context: "移动笔记到文件夹")
     }
 
-    /// ⚠️ **写操作**：在「备忘录」中新建一条笔记，不可撤销。
-    ///
-    /// - Parameters:
-    ///   - folder: 目标文件夹名；传 `nil` 时由「备忘录」放入默认位置。
-    ///   - html: 笔记正文，HTML 片段。
-    /// - Returns: 新建笔记的内部 id。
-    ///
-    /// 与 `setBody` 相同，正文经临时文件传入，避免命令行参数长度限制。
     static func createNote(folder: String?, html: String) async throws -> String {
         let tmp = try writeTempHTML(html)
         defer { try? FileManager.default.removeItem(at: tmp) }
@@ -393,29 +255,6 @@ enum NotesImporter {
         return id
     }
 
-    // MARK: - AppleScript 组装
-
-    /// 生成「遍历一批笔记、按 RS/US 拼接成一条字符串返回」的脚本。
-    ///
-    /// **文件夹的取法（实测修正）**：脚本改为「外层遍历文件夹、内层遍历笔记」，
-    /// 直接把外层循环变量当成这条笔记的文件夹名。
-    ///
-    /// 原因是 2026-10-14 在 macOS 27 上实测发现：`name of container of n` 与
-    /// `name of folder of n` 都返回空字符串，而 `notes of folder` 完全正常。
-    /// 也就是说从「笔记」这一侧反查文件夹在本版本上不可靠，从「文件夹」这一侧正查才是稳的。
-    ///
-    /// - Parameters:
-    ///   - folderFilter: 非 nil 时只遍历该文件夹。
-    ///   - titleFilter: 非 nil 时只保留 `name` 与之精确相等的笔记（区分大小写）。
-    ///   - includeBodyLength: 是否逐条读取 `body` 以取得长度。
-    ///     这是整个脚本里**唯一昂贵的操作**——AppleScript 每取一次 `body` 都要跨进程往返，
-    ///     1000 条笔记可能要几十秒。因此默认关闭，只在确实需要时打开。
-    ///
-    /// 每条记录格式固定为：`id US name US folder US created US modified US bodyLength RS`。
-    /// 其它关键点：
-    /// - `id of n` 必须取到，它是后续 `setBody(id:)` 定位笔记的唯一钥匙；
-    /// - 日期由脚本里的 `isoLocal` 处理器拼成固定格式，避免受系统区域设置影响；
-    /// - 每项的取值都包在 `try` 里，单条笔记取不到字段时降级为空串，不连累整批。
     private static func makeListScript(folderFilter: String?,
                                        titleFilter: String?,
                                        includeBodyLength: Bool) -> String {
@@ -434,7 +273,6 @@ enum NotesImporter {
             emitBlock = "        \(appendLine)"
         }
 
-        // 只在需要时才把「读 body」这段塞进脚本
         let lengthBlock: String
         if includeBodyLength {
             lengthBlock = """
@@ -447,7 +285,6 @@ enum NotesImporter {
             lengthBlock = "        set theLenStr to \"0\""
         }
 
-        // 指定文件夹时，只对该文件夹生效
         let folderGuard: String
         if let folderFilter {
             folderGuard = """
@@ -530,7 +367,6 @@ enum NotesImporter {
         """
     }
 
-    /// 把 AppleScript 返回的 RS/US 记录串解析成 `AppleNote` 数组。
     private static func parseAppleNotes(_ raw: String) -> [AppleNote] {
         guard !raw.isEmpty else { return [] }
         var result: [AppleNote] = []
@@ -538,7 +374,7 @@ enum NotesImporter {
             let fields = record
                 .split(separator: fieldSeparator, omittingEmptySubsequences: false)
                 .map(String.init)
-            // 正常是 6 个字段；字段数不对说明这条记录损坏，跳过而不是让整批失败。
+
             guard fields.count >= 6 else { continue }
             result.append(AppleNote(
                 id: fields[0],
@@ -552,17 +388,6 @@ enum NotesImporter {
         return result
     }
 
-    // MARK: - 转义与临时文件
-
-    /// 把 Swift 字符串安全地嵌进 AppleScript 字符串字面量。
-    ///
-    /// AppleScript 字符串用双引号包裹，反斜杠是转义前导符，所以只有两个字符必须处理：
-    /// - `\` → `\\`
-    /// - `"` → `\"`
-    ///
-    /// 顺序上逐字符扫描天然正确（先处理反斜杠再处理引号不会互相污染）。
-    /// HTML 正文里几乎必然出现双引号（如 `<div style="…">`），转义漏一处就会直接语法错误，
-    /// 因此凡是把外部文本拼进脚本的地方都必须经过本函数。
     private static func escapeForAppleScript(_ s: String) -> String {
         var out = ""
         out.reserveCapacity(s.count + 16)
@@ -579,11 +404,6 @@ enum NotesImporter {
         return out
     }
 
-    /// 把大段 HTML 写到临时文件并返回路径。
-    ///
-    /// 之所以不把正文直接拼进脚本：osascript 是通过命令行参数（`-e`）接收脚本的，
-    /// 参数长度有上限，而笔记正文动辄几十上百 KB，直接嵌入会被截断或直接报参数过长。
-    /// 写到临时文件后，脚本里只留一条短短的路径，再用 `read … as «class utf8»` 把内容读进来。
     private static func writeTempHTML(_ html: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("minotebridge-\(UUID().uuidString).html")
@@ -598,9 +418,6 @@ enum NotesImporter {
         return url
     }
 
-    // MARK: - 执行与错误分类
-
-    /// 统一入口：交给 `NotesBridge.run` 执行，并把底层错误翻译成 `NotesImportError`。
     private static func runClassified(_ script: String, context: String) async throws -> String {
         do {
             return try await NotesBridge.run(script)
@@ -611,13 +428,6 @@ enum NotesImporter {
         }
     }
 
-    /// 把 `NotesBridgeError` 映射成更具体的 `NotesImportError`。
-    ///
-    /// 已知的 AppleScript 错误码：
-    /// - `-1743` 无自动化权限
-    /// - `-600`  目标进程（备忘录）未运行
-    /// - `-1728` 找不到对象（文件夹或笔记 id 不存在）
-    /// - `-1708` 事件不被支持（版本差异）
     private static func classify(_ error: NotesBridgeError) -> NotesImportError {
         switch error {
         case .notAuthorized:
@@ -645,7 +455,6 @@ enum NotesImporter {
         }
     }
 
-    /// 从 AppleScript 报错文本里抠出括号中的数字错误码，例如 `… (-1728)` → -1728。
     private static func extractErrorCode(_ message: String) -> Int? {
         let pattern = "\\(\\s*(-?[0-9]{3,5})\\s*\\)"
         guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }

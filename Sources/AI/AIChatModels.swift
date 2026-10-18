@@ -1,9 +1,6 @@
 import Foundation
 import SwiftUI
 
-// MARK: - 消息
-
-/// 对话里的一条消息。
 struct AIChatMessage: Identifiable, Equatable {
 
     enum Role: Equatable {
@@ -12,11 +9,11 @@ struct AIChatMessage: Identifiable, Equatable {
     }
 
     enum State: Equatable {
-        /// 正常完成（用户消息恒为它）
+
         case done
-        /// 正在等模型
+
         case sending
-        /// 失败，附带可读原因
+
         case failed(String)
     }
 
@@ -42,12 +39,6 @@ struct AIChatMessage: Identifiable, Equatable {
     }
 }
 
-// MARK: - 附件
-
-/// 用户附给对话的一份资料。
-///
-/// 图片走 `rawData`（交给视觉模型），表格/文本先转成 `extractedText`
-/// 再拼进消息正文——这样同一条链路上既能看截图又能做数据对比。
 struct ChatAttachment: Identifiable, Equatable {
 
     enum Kind: Equatable {
@@ -59,9 +50,9 @@ struct ChatAttachment: Identifiable, Equatable {
     let id: UUID
     let kind: Kind
     let displayName: String
-    /// 给模型看的文本：表格转成的制表符文本、文本文件原文。图片为空。
+
     var extractedText: String
-    /// 原始字节，仅图片使用。
+
     var rawData: Data?
     var mimeType: String?
 
@@ -95,7 +86,6 @@ struct ChatAttachment: Identifiable, Equatable {
         }
     }
 
-    /// 气泡/待发区上的一行摘要
     var summaryLine: String {
         switch kind {
         case .image:
@@ -109,7 +99,6 @@ struct ChatAttachment: Identifiable, Equatable {
         }
     }
 
-    /// 拼进用户消息正文时的块
     var promptBlock: String {
         switch kind {
         case .image:
@@ -122,26 +111,15 @@ struct ChatAttachment: Identifiable, Equatable {
     }
 }
 
-// MARK: - 会话
-
-/// 一次对话的状态与请求编排。
-///
-/// 刻意做得很薄：只管「消息列表 + 发送 + 重试」，不碰界面、不碰笔记。
-/// 界面（`AIChatView`）和附件读取（`AttachmentReader`）各自独立，靠这里的数据类型对接。
 @MainActor
 final class AIChatSession: ObservableObject {
 
     @Published var messages: [AIChatMessage] = []
     @Published var draft: String = ""
-    /// 已选中、还没发出去的附件
+
     @Published var pending: [ChatAttachment] = []
     @Published var isSending: Bool = false
 
-    /// 当前正在看的笔记（标题 + 正文）。
-    ///
-    /// **没有它，模型只能盲答**：用户说"总结这篇""把第二段改成表格"，
-    /// 它不知道"这篇""第二段"指的是什么，只能反问或者瞎猜。
-    /// 界面在切换笔记时设置，会话不需要知道笔记是怎么来的。
     var noteContext: NoteContext?
 
     struct NoteContext {
@@ -151,18 +129,12 @@ final class AIChatSession: ObservableObject {
 
     private let provider: AIProvider
 
-    /// 送进上下文的历史条数上限。
-    ///
-    /// 不做精确 token 计算：笔记动辄几万字，估错反而浪费一次请求。
-    /// 按条数 + 单条字数双上限，粗但不会失控。
     private static let maxHistoryMessages = 12
     private static let maxMessageCharacters = 30_000
 
     init(provider: AIProvider = .shared) {
         self.provider = provider
     }
-
-    // MARK: 附件
 
     func attach(_ items: [ChatAttachment]) {
         pending.append(contentsOf: items)
@@ -172,15 +144,12 @@ final class AIChatSession: ObservableObject {
         pending.removeAll { $0.id == id }
     }
 
-    // MARK: 状态
-
     var canSend: Bool {
         guard !isSending else { return false }
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty || !pending.isEmpty
     }
 
-    /// 末尾是失败态时，输入区给一个「重试」
     var canRetry: Bool {
         guard !isSending, let last = messages.last else { return false }
         if case .failed = last.state { return true }
@@ -188,8 +157,6 @@ final class AIChatSession: ObservableObject {
     }
 
     var isEmpty: Bool { messages.isEmpty }
-
-    // MARK: 发送
 
     func send() {
         guard canSend else { return }
@@ -201,10 +168,6 @@ final class AIChatSession: ObservableObject {
         Task { await run() }
     }
 
-    /// 移除一张待发附件。
-    ///
-    /// 只动 `pending`：已经发出去的消息里的附件不该被这里影响——
-    /// 那个阶段的附件属于历史记录，删了会让对话里出现空白气泡。
     func removeAttachment(_ item: ChatAttachment) {
         pending.removeAll { $0.id == item.id }
     }
@@ -223,8 +186,6 @@ final class AIChatSession: ObservableObject {
         pending.removeAll()
         draft = ""
     }
-
-    // MARK: 请求
 
     private func run() async {
         isSending = true
@@ -247,9 +208,6 @@ final class AIChatSession: ObservableObject {
     private func buildMessages() -> [AIMessage] {
         var out: [AIMessage] = [.system(Self.systemPrompt)]
 
-        // **把当前笔记塞进上下文。**
-        // 放在 system 而不是 user：它是"背景信息"，不是用户说的话；
-        // 混进 user 会让模型以为用户重复贴了一遍正文。
         if let context = noteContext {
             out.append(.system("""
             当前正在查看的笔记是《\(context.title)》。正文如下（已转成纯文本）：
@@ -269,7 +227,7 @@ final class AIChatSession: ObservableObject {
                 }
                 out.append(images.isEmpty ? .user(body) : .userWithImages(text: body, images: images))
             case .assistant:
-                // 失败/占位的回复不进上下文，否则会把错误信息当历史喂回去
+
                 guard m.state == .done, !m.text.isEmpty else { continue }
                 out.append(.assistant(clamp(m.text)))
             }
@@ -291,8 +249,6 @@ final class AIChatSession: ObservableObject {
         let head = s.prefix(Self.maxMessageCharacters)
         return String(head) + "\n\n…（内容过长，已截断 \(s.count - Self.maxMessageCharacters) 字）"
     }
-
-    // MARK: 文案
 
     static func describe(_ error: Error) -> String {
         if let e = error as? AIError {
@@ -320,10 +276,6 @@ final class AIChatSession: ObservableObject {
         return error.localizedDescription
     }
 
-    /// HTML → 纯文本。只用于喂给模型。
-    ///
-    /// 标签对模型理解没有帮助，反而白占 token（一篇带样式的中文笔记，
-    /// 标签能占掉一半篇幅）。块级标签转成换行，其余直接去掉。
     static func plainText(from html: String) -> String {
         var s = html
         s = s.replacingOccurrences(of: "<br\\s*/?>", with: "\n", options: .regularExpression)

@@ -1,9 +1,5 @@
 import SwiftUI
 
-/// 第 1 步：用户许可。
-///
-/// 排版参照 macOS 系统自带的软件许可协议界面：正文可滚动、底部按钮固定，
-/// **不强制滚动到底才能同意**——强制滚动只会训练用户盲滚，而不是真的去读。
 struct LicenseStepView: View {
     let onAgree: () -> Void
     let onDecline: () -> Void

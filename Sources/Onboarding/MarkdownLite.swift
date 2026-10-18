@@ -1,10 +1,5 @@
 import SwiftUI
 
-/// 极简 Markdown 渲染器。
-///
-/// 只支持本协议实际用到的语法：段落、`**加粗**`、`---` 分隔线、``` 代码块。
-/// 之所以不直接用 `AttributedString(markdown:)` 整体渲染，是因为协议排版对段落间距、
-/// 行距和分隔线留白的要求比较细，逐块渲染才能控制住。
 struct MarkdownLite: View {
     let text: String
     var bodySize: CGFloat = 13

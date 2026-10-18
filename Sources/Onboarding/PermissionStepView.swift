@@ -1,23 +1,16 @@
 import SwiftUI
 import AppKit
 
-/// 第 2 步：申请「备忘录」的自动化权限。
-///
-/// 设计原则：**不让用户面对一个不知道会发生什么的按钮**，也**不让界面出现空白状态**。
-///
-/// 这里把授权过程拆成八个明确状态，而不是简单的「授权 / 未授权」两态。原因是 macOS 的
-/// 自动化授权弹窗是异步的：点下「授权」之后，界面会停在「等你在系统弹窗里选」这个状态，
-/// 可能持续几十秒（弹窗被挡在窗口后面时甚至更久）。如果这时界面是空的，用户会以为程序死了。
 struct PermissionStepView: View {
     let onContinue: () -> Void
 
     enum Phase: Equatable {
-        case checking               // 正在检测既有授权
-        case notYetAsked            // 尚未授权，还没问过
-        case awaitingSystemDialog   // 已发出请求，等用户在系统弹窗中作出选择
+        case checking
+        case notYetAsked
+        case awaitingSystemDialog
         case granted
         case denied
-        case notCompleted           // 请求发出去了，系统却没给结果
+        case notCompleted
         case systemAppMissing
         case unknown(OSStatus)
 
@@ -76,8 +69,6 @@ struct PermissionStepView: View {
         .task { await refresh() }
     }
 
-    // MARK: - 用途说明
-
     private var usesCard: some View {
         DSCard(title: "这项权限的用途", icon: "lock.shield") {
             VStack(alignment: .leading, spacing: DS.Space.m) {
@@ -93,8 +84,6 @@ struct PermissionStepView: View {
             }
         }
     }
-
-    // MARK: - 文案
 
     private var icon: String {
         switch phase {
@@ -162,9 +151,6 @@ struct PermissionStepView: View {
         }
     }
 
-    // MARK: - 辅助卡片
-
-    /// 弹窗被挡在窗口后面，是「点了没反应」最常见的原因
     private var dialogHint: some View {
         DSCard(title: "没看到弹窗？", icon: "questionmark.circle") {
             VStack(alignment: .leading, spacing: DS.Space.s) {
@@ -192,10 +178,8 @@ struct PermissionStepView: View {
         }
     }
 
-    // MARK: - 动作
-
     private func request() {
-        // 先把本应用提到最前，否则系统弹窗容易出现在别的窗口后面
+
         NSApp.activate(ignoringOtherApps: true)
         phase = .awaitingSystemDialog
         Task {
@@ -207,13 +191,9 @@ struct PermissionStepView: View {
 
     private func refresh() async {
         phase = .checking
-        // 给界面一帧时间先把「正在检测」画出来，避免闪一下空白
+
         try? await Task.sleep(nanoseconds: 250_000_000)
-        // **不要在这里拉起「备忘录」。**
-        // 用户只是走到这一步、还没点「授权」，不该看到 Dock 里突然多出一个备忘录
-        // （甚至把它的首次启动向导弹出来）。这里只做状态查询：
-        // 没运行就如实标成「未运行」，等用户真的点「授权」时再由 `request()`
-        // 拉起——那时是他明确要求的结果。
+
         let status = NotesBridge.automationStatus(askUser: false)
         if status == .targetNotRunning {
             phase = .systemAppMissing
@@ -222,9 +202,6 @@ struct PermissionStepView: View {
         phase = classify(status, asked: false)
     }
 
-    /// 把系统返回码翻成界面状态。
-    /// `asked` 表示这次结果是「刚问过用户」还是「只是单纯查询」——
-    /// 同样返回 notDetermined，含义完全不同：问过了还没结果就是没完成。
     private func classify(_ status: AutomationStatus, asked: Bool) -> Phase {
         switch status {
         case .authorized: return .granted

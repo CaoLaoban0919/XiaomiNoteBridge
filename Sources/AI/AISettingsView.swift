@@ -1,25 +1,5 @@
 import SwiftUI
 
-// 「内置 AI」的配置界面。
-//
-// 交互按三步走，每一步都由用户显式触发：
-//   1. 填服务地址 + API Key（地址拼得对不对，下面实时回显两个最终接口地址）
-//   2. 点「检索模型」→ 模型面板从服务框下方展开
-//   3. 在面板里直接勾选文本模型 / 视觉模型，保存
-//
-// 两条硬约束：
-// 1. **出错一律弹窗。** 地址没填、密钥没填、接口 404、网络超时……
-//    全都走 alert，而不是在页面上留一行小字——那行字用户经常根本不会注意到。
-//    弹窗还能带动作按钮：服务不支持 /models 时直接给「手动填写」。
-// 2. **最终请求地址必须可见。** 配置错了九成是地址拼错，
-//    把拼装结果摊开给他看，比任何错误提示都管用。
-
-// MARK: - 模型列表状态
-
-/// 模型列表的加载状态机。
-///
-/// 单独拎出来是因为它比视图活得久：用户在「文本 / 视觉」两个槽位间切换时，
-/// 列表不该跟着重新拉一遍。
 @MainActor
 final class AIModelCatalog: ObservableObject {
 
@@ -27,7 +7,7 @@ final class AIModelCatalog: ObservableObject {
         case idle
         case loading
         case loaded([String])
-        /// `allowsManualEntry` 为真时，界面在弹窗上额外给一个「手动填写」按钮。
+
         case failed(message: String, allowsManualEntry: Bool)
     }
 
@@ -40,7 +20,6 @@ final class AIModelCatalog: ObservableObject {
         return []
     }
 
-    /// 用一份**可能是草稿**的配置去取列表：用户还没保存也应该能先看到有哪些模型。
     func load(baseURL: String, apiKey: String) {
         let base = baseURL.trimmed
         let key = apiKey.trimmed
@@ -78,9 +57,6 @@ final class AIModelCatalog: ObservableObject {
     }
 }
 
-// MARK: - 界面
-
-/// AI 设置弹窗。无参构造（`AISettingsSheet()`）即可，由主界面以 sheet 方式引用。
 struct AISettingsSheet: View {
 
     @Environment(\.dismiss) private var dismiss
@@ -93,14 +69,12 @@ struct AISettingsSheet: View {
     @State private var confirmingClear = false
     @State private var pendingSave: Task<Void, Never>?
 
-    /// 唯一的错误出口。任何一步失败都塞进这里，由 alert 弹出来。
     @State private var alertItem: AlertItem?
 
-    /// 模型面板是否展开。展开动作由「检索模型」或「手动填写」触发。
     @State private var showsPicker = false
-    /// 面板的后备形态：不走列表，直接手打模型名。
+
     @State private var manualEntry = false
-    /// 面板当前在为哪个槽位选模型。
+
     @State private var slot: ModelSlot = .text
     @State private var query = ""
 
@@ -155,8 +129,7 @@ struct AISettingsSheet: View {
                 }
                 .onChange(of: showsPicker) { _, isOpen in
                     guard isOpen else { return }
-                    // 面板展开后可能长于剩余可视高度。不主动滚一下，
-                    // 用户点了「检索模型」只会看到页面变长，面板还在视野外面。
+
                     withAnimation(AISettingsSheet.pickerAnimation) {
                         proxy.scrollTo(Self.pickerAnchor, anchor: .bottom)
                     }
@@ -187,8 +160,7 @@ struct AISettingsSheet: View {
             Text(item.message)
         }
         .onChange(of: draft) { _, newValue in
-            // 停手后自动落盘：即使用户直接关窗，改动也不会丢。
-            // 右上角「保存」是显式确认，两者不冲突。
+
             pendingSave?.cancel()
             pendingSave = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: AISettingsSheet.saveDelayNanoseconds)
@@ -197,7 +169,7 @@ struct AISettingsSheet: View {
             }
         }
         .onChange(of: catalog.state) { _, newState in
-            // 检索失败：收起面板 + 弹窗说明。面板原地留着只会显示一片空白。
+
             guard case .failed(let message, let allowsManual) = newState else { return }
             withAnimation(AISettingsSheet.pickerAnimation) { showsPicker = false }
             alertItem = AlertItem(title: "检索失败", message: message,
@@ -211,8 +183,6 @@ struct AISettingsSheet: View {
             set: { if !$0 { alertItem = nil } }
         )
     }
-
-    // MARK: 头部
 
     private var header: some View {
         HStack(alignment: .top, spacing: DS.Space.m) {
@@ -231,8 +201,6 @@ struct AISettingsSheet: View {
         .padding(.vertical, DS.Space.l)
     }
 
-    // MARK: 状态行
-
     private var statusLine: some View {
         HStack(spacing: DS.Space.s) {
             Circle()
@@ -242,8 +210,7 @@ struct AISettingsSheet: View {
             Text(statusDetail)
                 .font(DS.Fonts.caption)
                 .foregroundStyle(.secondary)
-                // 单行截断会把"为什么不能用"这类关键信息切掉一半，
-                // 而这行恰恰是用户唯一能看到的诊断。给两行，够用且不喧宾夺主。
+
                 .lineLimit(2)
                 .truncationMode(.middle)
                 .fixedSize(horizontal: false, vertical: true)
@@ -277,8 +244,6 @@ struct AISettingsSheet: View {
 
     private var isDirty: Bool { draft != provider.config }
 
-    // MARK: 连接
-
     private var connectionCard: some View {
         DSCard(title: "连接", icon: "network") {
             VStack(alignment: .leading, spacing: DS.Space.m) {
@@ -310,8 +275,6 @@ struct AISettingsSheet: View {
         }
     }
 
-    /// 两种资源的最终地址。**这是整个界面最重要的信息**——
-    /// 用户填的地址五花八门，出问题时第一件事就是看这里拼成了什么。
     private var endpointRows: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             monoLine(label: "聊天地址",
@@ -353,7 +316,6 @@ struct AISettingsSheet: View {
         return "\(draft.model)（跟随文本）"
     }
 
-    /// 检索模型是主操作，手动填写是后备——两者并排，谁都不被藏起来。
     private var actionRow: some View {
         HStack(spacing: DS.Space.m) {
             Button {
@@ -403,8 +365,6 @@ struct AISettingsSheet: View {
             }
         }
     }
-
-    // MARK: 模型面板
 
     private var pickerPanel: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
@@ -478,8 +438,7 @@ struct AISettingsSheet: View {
     private var modelList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                // 视觉槽位多一条「跟随文本模型」，对应 visionModel 留空的语义。
-                // 放在列表第一行，比在旁边加个开关更容易被发现。
+
                 if slot == .vision {
                     row(title: draft.model.isEmpty ? "跟随文本模型（尚未选文本模型）" : "跟随文本模型",
                         detail: draft.model.isEmpty ? nil : draft.model,
@@ -580,12 +539,8 @@ struct AISettingsSheet: View {
         }
     }
 
-    // MARK: 底部
-
     private var footer: some View {
-        // 用 `~` 缩略路径，不要贴完整绝对路径。
-        // `/Users/<名字>/Library/Application Support/...` 会把底栏撑到换行，
-        // 而用户真正需要知道的是"存在本机、不联网"，不是路径前缀。
+
         let shown = (AIConfigStore.fileURL.path as NSString).abbreviatingWithTildeInPath
         return DSFooter(note: "配置只保存在本机 \(shown)（权限 0600），不会上传。") {
             Button("清除配置", role: .destructive) { confirmingClear = true }
@@ -602,8 +557,6 @@ struct AISettingsSheet: View {
         }
     }
 
-    // MARK: 动作
-
     private var isTesting: Bool {
         if case .running = test { return true }
         return false
@@ -615,7 +568,6 @@ struct AISettingsSheet: View {
             && !draft.model.trimmed.isEmpty
     }
 
-    /// 检索模型：先做本地校验，任何一项不成立都直接弹窗，不发请求。
     private func retrieveModels() {
         let base = draft.baseURL.trimmed
         let key = draft.apiKey.trimmed
@@ -653,7 +605,6 @@ struct AISettingsSheet: View {
             return
         }
 
-        // 用草稿测：用户还没保存也应该能先验证。
         var probeConfig = draft
         probeConfig.enabled = true
         let probe = AIProvider(config: probeConfig)
@@ -669,7 +620,6 @@ struct AISettingsSheet: View {
         }
     }
 
-    /// 保存：写盘失败**不关窗**，否则用户以为存上了，其实没有。
     private func save() {
         pendingSave?.cancel()
         provider.update(draft)
@@ -691,9 +641,6 @@ struct AISettingsSheet: View {
     }
 }
 
-// MARK: - 工具
-
-/// 把错误翻成给人看的一句话。AIError 自带文案，其余走系统的 localizedDescription。
 private func aiMessage(for error: Error) -> String {
     if let aiError = error as? AIError, let text = aiError.errorDescription { return text }
     return error.localizedDescription

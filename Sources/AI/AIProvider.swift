@@ -1,38 +1,14 @@
 import Foundation
 import SwiftUI
 
-// 「内置 AI」这条链路的第一段：**可配置的 OpenAI 兼容客户端 + 配置存储 + 设置界面**。
-//
-// 设计原则（来自契约）：**不预设厂商。** baseURL / apiKey / 模型名全部由用户填写。
-// 所以这里没有 `case .deepseek` 这类分支，也不给任何一家写默认地址——
-// DeepSeek、OpenAI、Moonshot、本地 Ollama / LM Studio 走的是同一条代码路径，
-// 差别只体现在用户填的那几个字符串上。
-//
-// 依赖：只依赖 `AIContract.swift`（共享契约）、`CredentialsStore`（存放位置与权限约定）、
-// `DS`（设计系统）。不 import 任何第三方。
-
-// MARK: - 配置存储
-
-/// AI 配置的落盘位置与权限。
-///
-/// 和登录凭证（`CredentialsStore`）同一套规矩：Application Support 下的 MiNoteBridge 目录，
-/// 目录 0700、文件 **0600**、原子写。区别只是文件名不同。
-///
-/// 之所以单独一个文件而不是塞进 `credentials.json`：两者生命周期不同——
-/// 退出登录会清凭证，但不该顺手把用户填的模型配置也删掉。
-///
-/// ⚠️ `apiKey` 只存在于这个文件里。它**不进 UserDefaults、不进日志、不进错误信息**。
 enum AIConfigStore {
 
     static let fileName = "ai-config.json"
 
-    /// 与凭证同目录（`CredentialsStore` 已经定义了「MiNoteBridge 放哪、权限怎么给」）
     static var directory: URL { CredentialsStore.directory }
 
     static var fileURL: URL { directory.appendingPathComponent(fileName, isDirectory: false) }
 
-    /// 读配置。文件不存在、读不动、解析失败都返回 nil——
-    /// 这几种情况对调用方是同一件事：「还没配好」。
     static func load() -> AIConfig? {
         guard let data = try? Data(contentsOf: fileURL),
               let config = try? JSONDecoder().decode(AIConfig.self, from: data)
@@ -40,24 +16,21 @@ enum AIConfigStore {
         return config
     }
 
-    /// 写配置。原子写 + 立刻收紧到 0600。
     static func save(_ config: AIConfig) throws {
         _ = CredentialsStore.ensureDirectory()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(config)
         try data.write(to: fileURL, options: [.atomic])
-        // 与 CredentialsStore.saveCookie 一致：写完立刻收紧权限，不依赖 umask。
+
         try? FileManager.default.setAttributes([.posixPermissions: 0o600],
                                                ofItemAtPath: fileURL.path)
     }
 
-    /// 删掉配置文件（「清除配置」走这里）。清掉之后 `load()` 返回 nil，语义闭环。
     static func clear() {
         try? FileManager.default.removeItem(at: fileURL)
     }
 
-    /// 当前文件权限的三位八进制表示（例如 `600`），供设置界面如实展示；文件不存在时为 nil。
     static func filePermission() -> String? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
               let mode = attrs[.posixPermissions] as? NSNumber
@@ -66,51 +39,32 @@ enum AIConfigStore {
     }
 }
 
-// MARK: - 客户端
-
-/// OpenAI 兼容客户端。**同一个类接所有家。**
-///
-/// 只有 `shared` 这个共享实例需要留意：UI 与「笔记 AI」读的是同一份配置，
-/// 否则设置界面改了地址、发请求的却是另一份旧值，那是很难查的 bug。
 final class AIProvider: ObservableObject, AIProviderProtocol {
 
     static let shared = AIProvider()
 
-    /// 请求超时。60 秒：本机模型冷启动也够，云端慢到 60 秒以上就该报错而不是干等。
     static let requestTimeout: TimeInterval = 60
 
-    /// 取模型列表的超时。比聊天短得多——它只返回一串名字，
-    /// 超过 20 秒还没响应，基本可断定地址填错或网络不通，没必要让用户干等。
     static let modelListTimeout: TimeInterval = 20
 
     @Published private(set) var config: AIConfig
 
-    /// 最近一次写盘失败的原因。**只含系统给的错误描述，不含 API Key。**
-    /// 设置界面据此显示「未保存」，而不是假装保存成功了。
     @Published private(set) var lastSaveError: String?
 
     private let session: URLSession
 
-    /// - Parameters:
-    ///   - config: 显式传入时不读盘（设置界面的「测试连接」用它试一份还没保存的草稿）。
-    ///             传 nil 则读盘。
-    ///   - session: 仅测试用。
     init(config: AIConfig? = nil, session: URLSession? = nil) {
         self.config = config ?? AIConfigStore.load() ?? .empty
         if let session {
             self.session = session
         } else {
-            // ephemeral：不落磁盘缓存。请求里带 API Key，不该在本地留下副本。
+
             let configuration = URLSessionConfiguration.ephemeral
             configuration.timeoutIntervalForRequest = AIProvider.requestTimeout
             self.session = URLSession(configuration: configuration)
         }
     }
 
-    /// 更新配置并写盘。
-    ///
-    /// 空配置（`AIConfig.empty`）等同于「没有配置」，所以走删除而不是写一个空文件——
-    /// 「清除配置」因此可以只是 `update(.empty)`，不需要第二套 API。
     func update(_ config: AIConfig) {
         self.config = config
         do {
@@ -125,32 +79,11 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         }
     }
 
-    // MARK: 请求地址归一化
-
-    /// 同一台服务上需要拼的两种资源。
-    ///
-    /// 放在一起归一化是有原因的：聊天地址和模型列表地址**必须落在同一个前缀上**，
-    /// 否则界面显示的是"连 A 服务"，实际取模型却去了 B 服务，出问题极难排查。
     enum AIResource: String, CaseIterable {
         case chatCompletions = "chat/completions"
         case models = "models"
     }
 
-    /// 把用户填的 baseURL 拼成**真正要请求的**资源地址。
-    ///
-    /// 用户会填出各种形态：带不带尾斜杠、带不带 `/v1`、甚至直接把完整接口地址抄进来。
-    /// 与其要求用户填对，不如统一在这里归一化，并在设置界面把结果**显示出来**让他核对。
-    ///
-    /// 规则（自上而下第一条命中即返回）：
-    /// 1. 空 → `badURL`。
-    /// 2. 没有 `://` 时补协议：本机（`localhost` / `127.0.0.1` / `0.0.0.0` / `::1`）补 `http://`，
-    ///    其余补 `https://`。
-    /// 3. 路径去尾斜杠。
-    /// 4. 路径若以**任意一种**已知资源结尾（用户粘的是完整接口地址）→ 先退回服务前缀。
-    ///    少了这步，从 `.../chat/completions` 切到 `/models` 会拼出
-    ///    `.../chat/completions/v1/models` 这种不存在的地址。
-    /// 5. 路径最后一段是 `v<数字>`（`/v1`、`/openai/v2`）→ 追加 `/<资源>`。
-    /// 6. 其余（只有主机名，或 `/openai` 这种没有版本段的前缀）→ 追加 `/v1/<资源>`。
     static func endpointURL(for baseURL: String,
                             resource: AIResource = .chatCompletions) throws -> URL {
         let raw = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -176,8 +109,6 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         var path = components.percentEncodedPath
         while path.hasSuffix("/") { path.removeLast() }
 
-        // 用户可能直接粘了某个完整接口地址：先退回服务前缀，再按目标资源重新拼。
-        // 少这一步，从 `.../chat/completions` 切到 `/models` 会拼出 `.../chat/completions/v1/models`。
         var lowercasedPath = path.lowercased()
         for known in AIResource.allCases {
             let marker = "/" + known.rawValue
@@ -202,9 +133,6 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         return url
     }
 
-    // MARK: 发请求
-
-    /// 发一轮对话。纯文本走 `config.model`，带图的消息走 `config.effectiveVisionModel`。
     func complete(_ messages: [AIMessage]) async throws -> AICompletion {
         let config = self.config
         guard config.isUsable else { throw AIError.notConfigured }
@@ -240,7 +168,7 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
             throw AIError.network("服务返回的不是 HTTP 响应。")
         }
         guard (200..<300).contains(http.statusCode) else {
-            // 错误体可能很大（有些网关会把整页 HTML 吐回来），截断后再放进错误里。
+
             throw AIError.http(http.statusCode, AIProvider.preview(of: data))
         }
 
@@ -258,9 +186,6 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         return AICompletion(text: text, model: decoded.model ?? model)
     }
 
-    /// 连通性测试：发一句最短的话，返回一句给人看的结果（含模型名与耗时）。
-    ///
-    /// 走的是同一条 `complete` 路径——测通了就能真的用，不存在「测试用一条特殊通道」。
     func testConnection() async throws -> String {
         let started = Date()
         let completion = try await complete([.user("你好")])
@@ -268,12 +193,6 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         return "\(completion.model) 响应正常，耗时 \(milliseconds) ms。"
     }
 
-    // MARK: 模型列表
-
-    /// 拉取服务端可用模型列表。
-    ///
-    /// **只要求 `baseURL` 与 `apiKey`**，不检查 `isUsable`——那个属性还要求已选好模型，
-    /// 而设置界面恰恰是在「还没选模型」的时候来取列表的，用 `isUsable` 会把入口死锁。
     func fetchModels() async throws -> [String] {
         let config = self.config
         let base = config.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -300,7 +219,7 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         guard let http = response as? HTTPURLResponse else {
             throw AIError.network("服务返回的不是 HTTP 响应。")
         }
-        // 404 / 405 是「这家没这个接口」的典型信号，单独给一条能指导下一步的提示。
+
         if http.statusCode == 404 || http.statusCode == 405 {
             throw AIError.modelListUnsupported
         }
@@ -315,7 +234,6 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
             throw AIError.network("无法解析模型列表：\(AIProvider.preview(of: data))")
         }
 
-        // 去重 + 去掉空白项：有的服务会把同一个模型名重复列好几遍。
         var seen = Set<String>()
         let ids = (decoded.data ?? []).compactMap { entry -> String? in
             guard let raw = entry.id else { return nil }
@@ -328,7 +246,6 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         return ids.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
-    /// 响应体的可读预览：压平换行 + 截断。错误信息里绝不能带上请求头（含 API Key）。
     private static func preview(of data: Data, limit: Int = 300) -> String {
         guard let raw = String(data: data, encoding: .utf8) else {
             return "（响应体不是 UTF-8 文本，\(data.count) 字节）"
@@ -341,11 +258,6 @@ final class AIProvider: ObservableObject, AIProviderProtocol {
         return collapsed.count <= limit ? collapsed : String(collapsed.prefix(limit)) + "…"
     }
 }
-
-// MARK: - 线上格式
-
-// OpenAI 的 wire 格式。单独拆出来是因为 `content` 有**两种形态**：
-// 纯文本时是字符串，带图时是块数组。用 `Encodable` 的自定义编码避开 `[String: Any]`。
 
 private struct ChatRequest: Encodable {
     var model: String
@@ -369,7 +281,7 @@ private struct WireMessage: Encodable {
             content = .plain(text)
         case .userWithImages(let text, let images):
             role = "user"
-            // 没有图时退回纯文本：别发一个只有文字块的块数组，有些服务端不认。
+
             content = images.isEmpty
                 ? .plain(text)
                 : .blocks(WireContent.blocks(text: text, images: images))
@@ -413,8 +325,6 @@ private enum WireContent: Encodable {
     }
 }
 
-// MARK: 响应
-
 private struct ChatResponse: Decodable {
     struct Choice: Decodable {
         struct Message: Decodable {
@@ -426,8 +336,6 @@ private struct ChatResponse: Decodable {
     var model: String?
 }
 
-/// 响应的 `content` 同样可能是字符串或块数组（有些服务端带图时回块数组）。
-/// 两种都收下，统一取纯文本部分。
 private enum FlexibleContent: Decodable {
     case plain(String)
     case blocks([TextBlock])
@@ -458,14 +366,9 @@ private enum FlexibleContent: Decodable {
     }
 }
 
-/// `GET /models` 的响应。只取 `data[].id`——
-/// 其余字段（`object` / `created` / `owned_by`）各家给得都不一样，一概不关心。
-/// `id` 声明为可选：个别服务（例如某些本地推理框架）会返回缺字段的条目，
-/// 整体解码不能因此失败，跳过那一条就好。
 private struct ModelListResponse: Decodable {
     struct Entry: Decodable {
         let id: String?
     }
     let data: [Entry]?
 }
-

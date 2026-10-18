@@ -1,30 +1,26 @@
 import Foundation
 import CryptoKit
 
-/// ENEX 里的一个附件（图片）
 struct EnexResource {
     var data: Data
     var mime: String
     var filename: String
-    /// 附件原始字节的 MD5（小写十六进制），ENEX 用它把正文里的 en-media 和资源对应起来
+
     var md5: String {
         Insecure.MD5.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
 
-/// ENEX 里的一条笔记
 struct EnexNote {
     var title: String
     var body: String
     var created: Date
     var updated: Date
-    /// 用小米的文件夹名当标签
+
     var tags: [String] = []
     var resources: [EnexResource] = []
 }
 
-/// 生成 Apple 备忘录 / Evernote 可导入的 ENEX 文件。
-/// 结构参照 aerragha/xiaomi-notes-to-apple-notes（MIT）。
 enum EnexWriter {
 
     private static let appName = "MiNoteBridge"
@@ -47,7 +43,6 @@ enum EnexWriter {
             xml += "<note>\n"
             xml += "<title>\(XiaomiConvert.escapeXML(note.title))</title>\n"
 
-            // en-note 包一层，再整体塞进 CDATA
             var enml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n"
             enml += "<!DOCTYPE en-note SYSTEM \"http://xml.evernote.com/pub/enml2.dtd\">\n"
             enml += "<en-note>\(note.body)</en-note>"
@@ -79,7 +74,7 @@ enum EnexWriter {
 
     static func write(notes: [EnexNote], to url: URL) throws {
         let text = render(notes: notes)
-        // 原子写入，避免导入到半个文件
+
         let tmp = url.deletingLastPathComponent().appendingPathComponent(".enex-\(UUID().uuidString).tmp")
         try text.data(using: .utf8)?.write(to: tmp, options: .atomic)
         if FileManager.default.fileExists(atPath: url.path) {
@@ -88,7 +83,6 @@ enum EnexWriter {
         try FileManager.default.moveItem(at: tmp, to: url)
     }
 
-    /// 做一次基本的自检：根元素、笔记数量、每个 en-media 都有对应资源
     static func validate(_ xml: String, expectedNotes: Int) -> [String] {
         var problems: [String] = []
         if !xml.contains("<en-export ") { problems.append("根元素不是 en-export") }
