@@ -66,6 +66,11 @@ struct WebNoteEditor: NSViewRepresentable {
 
         webView.setValue(false, forKey: "drawsBackground")
         webView.underPageBackgroundColor = .clear
+        // **让 WebView 跟随系统外观。**
+        // WKWebView 默认按 light 解析 `prefers-color-scheme`，即使系统在深色模式：
+        // 于是 @media 里的浅色文字规则永远不触发，正文一直用深灰字压在深色底上——
+        // 表现就是"深色模式下文字看不见"。nil = 继承窗口的 effectiveAppearance。
+        webView.appearance = nil
 
         context.coordinator.webView = webView
         context.coordinator.load(html: html, images: images, editable: isEditable)
