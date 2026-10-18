@@ -6,6 +6,8 @@ struct AIChatView: View {
     @ObservedObject private var session: AIChatSession
 
     @State private var showingAttachmentList = false
+    /// 技能选择弹层
+    @State private var showingSkillPicker = false
 
     var onApply: ((String) -> Void)?
 
@@ -342,26 +344,14 @@ struct AIChatView: View {
     }
 
     /// 技能选择：切换会换掉 system prompt 里的行为规范（重构/总结/答疑/对话）。
+    ///
+    /// 用 Button + popover 而不是 Menu：`Menu` 在 `.borderlessButton` 下对自定义
+    /// label 的度量有问题，同样的图片按钮在 Menu 里会被压成 0 宽——代码里明明有，
+    /// 界面上一片空白。popover 完全由自己布局，不受这套内部实现影响。
     private var skillMenu: some View {
-        Menu {
-            ForEach(AISkill.all) { skill in
-                Button {
-                    session.activeSkill = skill
-                } label: {
-                    Label {
-                        VStack(alignment: .leading) {
-                            Text(skill.name)
-                            Text(skill.summary).font(.caption)
-                        }
-                    } icon: {
-                        Image(systemName: skill.icon)
-                    }
-                }
-            }
+        Button {
+            showingSkillPicker.toggle()
         } label: {
-            // 每个功能键各自一颗独立的圆形玻璃按钮。
-            // 配色用 primary 的透明度而不是固定灰：深色模式下 primary 是白色，
-            // 同样的 0.08 会变成"浅色玻璃"，不会像固定灰那样在深色底上糊掉。
             Image(systemName: session.activeSkill.icon)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DS.Palette.accent)
@@ -370,12 +360,44 @@ struct AIChatView: View {
                 .overlay(Circle().stroke(Color.primary.opacity(0.28), lineWidth: 0.8))
                 .contentShape(Circle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        // 不加 .fixedSize()：Menu 内部是 NSPopUpButton，
-        // fixedSize 会按"最小理想宽度"布局，自定义 label 容易被压成 0 宽——
-        // 表现就是按钮在界面上完全看不见，但代码里明明写了。外层 .frame(32) 已经够定宽。
+        .buttonStyle(.plain)
         .help("\(session.activeSkill.name)：\(session.activeSkill.summary)")
+        .popover(isPresented: $showingSkillPicker, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(AISkill.all) { skill in
+                    Button {
+                        session.activeSkill = skill
+                        showingSkillPicker = false
+                    } label: {
+                        HStack(spacing: DS.Space.s) {
+                            Image(systemName: skill.icon)
+                                .frame(width: 18)
+                                .foregroundStyle(skill.id == session.activeSkill.id
+                                                 ? DS.Palette.accent : .secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(skill.name)
+                                    .font(.system(size: 12, weight: .medium))
+                                Text(skill.summary)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 12)
+                            if skill.id == session.activeSkill.id {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(DS.Palette.accent)
+                            }
+                        }
+                        .padding(.horizontal, DS.Space.s)
+                        .padding(.vertical, 5)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(DS.Space.s)
+            .frame(width: 260)
+        }
     }
 
     private var attachMenu: some View {
