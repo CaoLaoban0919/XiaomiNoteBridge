@@ -333,8 +333,17 @@ struct AIChatView: View {
     private var composer: some View {
 
         HStack(alignment: .bottom, spacing: DS.Space.s) {
-            attachMenu
-            skillMenu
+            // 两个功能键共用一颗液态玻璃胶囊：它们是"调输入方式"的一组，
+            // 各自套一个圆会让底部出现三个彼此无关的圆圈。
+            HStack(spacing: 0) {
+                attachMenu
+                skillMenu
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 3)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().stroke(DS.Palette.stroke, lineWidth: 0.8))
+
             draftField
             sendButton
         }
@@ -359,14 +368,13 @@ struct AIChatView: View {
                 }
             }
         } label: {
-            // 圆形液态玻璃按钮：功能键和输入框在同一视觉层级，
-            // 纯色小圆点看起来像状态灯，不像能点的东西。
+            // 图标本身不再带背景——外面那层玻璃胶囊负责容器感，
+            // 里面再画圆会变成"圆套圆"。
             Image(systemName: session.activeSkill.icon)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DS.Palette.accent)
                 .frame(width: 30, height: 30)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 0.8))
+                .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -397,11 +405,10 @@ struct AIChatView: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(DS.Palette.accent)
                     .frame(width: 30, height: 30)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 0.8))
+                    .contentShape(Circle())
 
                 if !session.pending.isEmpty {
                     Text("\(session.pending.count)")
