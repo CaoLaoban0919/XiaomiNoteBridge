@@ -106,8 +106,10 @@ enum AITextToHTML {
         }
 
         // 环形镂空 + 中心总量
+        // 文字用 currentColor：它继承正文的 color，深色模式下正文是浅色，
+        // 图表文字跟着变浅。写死 #333 会在深色底上直接消失。
         parts.append("<circle cx=\"\(center)\" cy=\"\(center)\" r=\"\(radius * 0.55)\" fill=\"white\"/>")
-        parts.append("<text x=\"\(center)\" y=\"\(center + 5)\" text-anchor=\"middle\" font-size=\"14\" font-weight=\"600\" fill=\"#333\">\(Int(total.rounded()))</text>")
+        parts.append("<text x=\"\(center)\" y=\"\(center + 5)\" text-anchor=\"middle\" font-size=\"14\" font-weight=\"600\" fill=\"currentColor\">\(Int(total.rounded()))</text>")
 
         // 右侧图例
         var legendY = 46.0
@@ -115,8 +117,8 @@ enum AITextToHTML {
             let color = palette[index % palette.count]
             let percent = item.value / total * 100
             parts.append("<rect x=\"300\" y=\"\(legendY - 9)\" width=\"10\" height=\"10\" rx=\"2\" fill=\"\(color)\"/>")
-            parts.append("<text x=\"318\" y=\"\(legendY)\" font-size=\"12\" fill=\"#333\">\(escape(item.label))</text>")
-            parts.append("<text x=\"470\" y=\"\(legendY)\" font-size=\"12\" fill=\"#888\" text-anchor=\"end\">\(Int(percent.rounded()))%</text>")
+            parts.append("<text x=\"318\" y=\"\(legendY)\" font-size=\"12\" fill=\"currentColor\">\(escape(item.label))</text>")
+            parts.append("<text x=\"470\" y=\"\(legendY)\" font-size=\"12\" fill=\"currentColor\" opacity=\"0.6\" text-anchor=\"end\">\(Int(percent.rounded()))%</text>")
             legendY += 22
         }
 
