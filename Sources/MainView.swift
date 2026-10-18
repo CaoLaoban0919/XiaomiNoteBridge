@@ -805,14 +805,11 @@ struct MainView: View {
     /// 之前的实现直接 `setBody`，等于每聊一句就覆盖一遍云端正文——
     /// 用户还没看清内容，远端那一份已经被改掉了，而且撤销也依赖再写一次。
     private func applyAIResult(_ text: String, to note: CachedNote) {
-        let paragraphs = text
-            .components(separatedBy: "\n\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map { "<p>" + $0.replacingOccurrences(of: "\n", with: "<br/>") + "</p>" }
-
-        guard !paragraphs.isEmpty else { return }
-        let addition = NotesHTMLSanitizer.sanitize(paragraphs.joined())
+        // 走 AITextToHTML：它会把 ```chart 代码块转成内联 SVG。
+        // 之前直接把每段套 <p>，JSON 就原样显示在正文里了。
+        // 这里不再过 NotesHTMLSanitizer——它不认识 <svg>，会把整张图删掉；
+        // 而文本部分已由 AITextToHTML 自己转义过了。
+        let addition = AITextToHTML.render(text)
         guard !addition.isEmpty else { return }
 
         let previous = noteHTML
