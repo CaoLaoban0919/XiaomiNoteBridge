@@ -69,8 +69,6 @@ struct MainView: View {
     @State private var showingSettings = false
     /// 把当前笔记移到回收站（可撤销，列表级）
     @State private var confirmingMoveToTrash = false
-    /// 从回收站彻底删除（不可逆，要二次确认）
-    @State private var confirmingPermanentDelete = false
     @State private var automation: AutomationStatus = .notDetermined
     @State private var checking = true
 
@@ -180,6 +178,60 @@ struct MainView: View {
         return notes
             .filter { !trashed.contains($0.id) }
             .sorted { $0.modifyDate > $1.modifyDate }
+    }
+
+    /// 批量移到回收站。**只改标记，不删任何内容。**
+    private func trashSelection() {
+        guard !importSelection.isEmpty else { return }
+        var state = SyncStateStore.load()
+        for noteId in importSelection {
+            if var record = state.notes[noteId] {
+                record.trashed = true
+                state.notes[noteId] = record
+            }
+        }
+        try? SyncStateStore.save(state)
+        importSelection.removeAll()
+        Task {
+            await pull.reloadFromCache()
+            afterCacheChanged()
+        }
+        showToast("已移到回收站，可在回收站恢复")
+    }
+
+    /// 批量恢复：清掉 `trashed` 标记，笔记回到原文件夹。
+    private func restoreSelection() {
+        guard !importSelection.isEmpty else { return }
+        var state = SyncStateStore.load()
+        for noteId in importSelection {
+            if var record = state.notes[noteId] {
+                record.trashed = false
+                state.notes[noteId] = record
+            }
+        }
+        try? SyncStateStore.save(state)
+        importSelection.removeAll()
+        Task {
+            await pull.reloadFromCache()
+            afterCacheChanged()
+        }
+        showToast("已恢复到原来的文件夹")
+    }
+
+    /// 单条恢复（详情栏按钮）。
+    private func restoreFromTrash(_ note: CachedNote) {
+        var state = SyncStateStore.load()
+        if var record = state.notes[note.id] {
+            record.trashed = false
+            state.notes[note.id] = record
+            try? SyncStateStore.save(state)
+        }
+        selectedNoteID = nil
+        Task {
+            await pull.reloadFromCache()
+            afterCacheChanged()
+        }
+        showToast("已恢复到原来的文件夹")
     }
 
     /// 当前是否处于回收站视图。
@@ -532,17 +584,39 @@ struct MainView: View {
                       : "勾选这个文件夹里所有可导入的笔记")
 
             if !importSelection.isEmpty {
-                Button {
-                    openImportApproval()
-                } label: {
-                    // 不放图标：中栏只有三百多点宽，加了图标说明文字就会被挤掉。
-                    Text(importButtonTitle)
+                if showingTrash {
+                    // 回收站里没有"导入"，同一位置换成"恢复"。
+                    // 回收站只是标记，恢复 = 把标记清掉，笔记回到原文件夹。
+                    Button {
+                        restoreSelection()
+                    } label: {
+                        Text("恢复（\(importSelection.count)）")
+                    }
+                    .controlSize(.small)
+                    .help("把这些笔记放回原来的文件夹")
+                } else {
+                    Button {
+                        openImportApproval()
+                    } label: {
+                        // 不放图标：中栏只有三百多点宽，加了图标说明文字就会被挤掉。
+                        Text(importButtonTitle)
+                    }
+                    .controlSize(.small)
+                    .dsPrimaryButton()
+                    .disabled(!canImport)
+                    .help("先看变更计划，确认后才写进备忘录")
+                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
+
+                    // 删除 = 移到回收站。**不删文件**：
+                    // 只是打个标记让它从文件夹里消失，随时能恢复。
+                    Button(role: .destructive) {
+                        trashSelection()
+                    } label: {
+                        Text("删除（\(importSelection.count)）")
+                    }
+                    .controlSize(.small)
+                    .help("移到回收站，不会删除笔记内容")
                 }
-                .controlSize(.small)
-                .dsPrimaryButton()
-                .disabled(!canImport)
-                .help("先看变更计划，确认后才写进备忘录")
-                .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
             }
 
             Text(selectionSummary)
@@ -635,21 +709,21 @@ struct MainView: View {
                                                   : "查看 AI 改写前的原文")
                         }
 
-                        // 回收站里给的是「彻底删除」，文件夹里给的是「移到回收站」。
-                        // 两步分开：第一步可撤销（列表级），第二步不可逆（要确认）。
-                        Button(role: .destructive) {
+                        // 文件夹里：「移到回收站」（可撤销，需确认）
+                        // 回收站里：「恢复」（放回原文件夹，直接生效）
+                        Button {
                             if showingTrash {
-                                confirmingPermanentDelete = true
+                                restoreFromTrash(note)
                             } else {
                                 confirmingMoveToTrash = true
                             }
                         } label: {
-                            Image(systemName: showingTrash ? "trash.slash" : "trash")
+                            Image(systemName: showingTrash ? "arrow.uturn.backward" : "trash")
                                 .font(.system(size: 11))
                         }
                         .buttonStyle(.borderless)
                         .controlSize(.small)
-                        .help(showingTrash ? "从回收站彻底删除" : "移到回收站")
+                        .help(showingTrash ? "恢复到原来的文件夹" : "移到回收站")
                     }
 
                     HStack(spacing: DS.Space.s) {
@@ -695,13 +769,7 @@ struct MainView: View {
             Button("移到回收站", role: .destructive) { moveToTrash(note) }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("它会从所有文件夹中消失，但仍能在回收站里找到，也可以放回来。")
-        }
-        .alert("彻底删除这条笔记？", isPresented: $confirmingPermanentDelete) {
-            Button("彻底删除", role: .destructive) { deletePermanently(note) }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("会从本地缓存和「备忘录」里一起删除，无法恢复。")
+            Text("它会从所有文件夹中消失，但仍能在回收站里找到并恢复。")
         }
         // 底部居中的临时提示：写入、自动保存、撤销这类"刚发生"的反馈放这里，
         // 不打断操作，也不占用正文位置。
