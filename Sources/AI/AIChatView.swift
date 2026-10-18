@@ -359,10 +359,13 @@ struct AIChatView: View {
                 }
             }
         } label: {
+            // 做成明确的按钮：描边 + 悬停高亮。纯图标会让人以为是状态指示，不是可点的。
             Image(systemName: session.activeSkill.icon)
-                .font(.system(size: 13))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(DS.Palette.accent)
                 .frame(width: 28, height: 28)
-                .background(DS.Palette.nest, in: Circle())
+                .background(DS.Palette.surface, in: Circle())
+                .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 1))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -397,6 +400,7 @@ struct AIChatView: View {
                     .foregroundStyle(DS.Palette.accent)
                     .frame(width: DS.Space.xl, height: DS.Space.xl)
                     .background(DS.Palette.surface, in: Circle())
+                    .overlay(Circle().stroke(DS.Palette.stroke, lineWidth: 1))
 
                 if !session.pending.isEmpty {
                     Text("\(session.pending.count)")
@@ -425,6 +429,14 @@ struct AIChatView: View {
             .padding(.horizontal, DS.Space.m)
             .padding(.vertical, DS.Space.s)
             .background(DS.Palette.nest, in: RoundedRectangle(cornerRadius: DS.Radius.m))
+            // 回车发送，⇧↩ 换行。
+            // 多行 TextField 里回车默认插换行、`.onSubmit` 不会被调用，
+            // 所以在按键阶段拦：Shift 按住就放行。
+            .onKeyPress(.return) {
+                if NSEvent.modifierFlags.contains(.shift) { return .ignored }
+                session.send()
+                return .handled
+            }
     }
 
     private var sendButton: some View {

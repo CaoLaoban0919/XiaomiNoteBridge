@@ -232,11 +232,19 @@ enum AITextToHTML {
     /// 这里只处理最常见的写法，覆盖 `∬_D`、`∫_α^β`、`r_{i}`、`**r**` 这类，
     /// 视觉上足够，且不影响编辑。
     private static func typesetMath(_ text: String) -> String {
+        // **含 $$ 的段落一律原样返回。**
+        // 里面有真正的 LaTeX，交给 KaTeX 处理；一旦在这里把 `x^p` 改成 `x<sup>p</sup>`，
+        // KaTeX 收到的就是残缺 HTML，整条公式渲染失败、退回显示源码。
+        // 之前 14.p 积分那条 `\begin{cases}` 不显示，就是这个原因。
+        if text.contains("$$") {
+            return text
+        }
+
         // **裸 LaTeX 兜底。**
         // AI 经常不写 `$`，直接甩 `\iint_D f(x,y)dxdy=...`。
         // 只要整段带数学命令、又没有中文字，就当块级公式包起来——
         // 否则 KaTeX 看不见它，用户只能看到反斜杠源码。
-        if !text.contains("$$"), looksLikeBareLaTeX(text) {
+        if looksLikeBareLaTeX(text) {
             return "$$\(text)$$"
         }
 
