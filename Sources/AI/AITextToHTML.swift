@@ -19,11 +19,15 @@ enum AITextToHTML {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             paragraph = []
             guard !joined.isEmpty else { return }
-            // **顺序很重要：先处理公式，再把换行转成 <br/>。**
-            // 反过来的话，行内公式内部的换行会先变成 `<br/>`，KaTeX 收到
-            // `<br/>` 就把它当强制换行，于是一行公式被拆成两行。
+            // **含公式的段落不做任何换行转换。**
+            // 上一版只保护了 HTML 转换，`<br/>` 替换仍在跑：
+            // 块级公式内部的换行被转成 `<br/>`，KaTeX 把它当强制换行，
+            // 一条公式就碎成「L =」「limu^v」「\Longrightarrow」好几行。
+            // 公式里的换行本来就该由 `\\` 控制，普通换行交给 KaTeX 自己忽略。
             var body = typesetMath(escape(joined))
-            body = body.replacingOccurrences(of: "\n", with: "<br/>")
+            if !joined.contains("$") {
+                body = body.replacingOccurrences(of: "\n", with: "<br/>")
+            }
             out.append("<p>\(body)</p>")
         }
 
@@ -239,7 +243,10 @@ enum AITextToHTML {
         // `x<sup>p</sup>`、把 `x_1` 改成 `x<sub>1</sub>`，KaTeX 收到的就是
         // 残缺 HTML——整条公式渲染失败，或者被拆成好几行。
         if text.contains("$") {
-            return text
+            // 块级公式内的裸换行压平成空格：KaTeX 只认 `\\` 作为换行，
+            // 一个物理换行会让它把一条公式切成几段。
+            guard text.contains("$$") else { return text }
+            return flattenInsideDisplayMath(text)
         }
 
         // **裸 LaTeX 兜底。**
@@ -277,6 +284,30 @@ enum AITextToHTML {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
         let range = NSRange(text.startIndex..., in: text)
         return regex.stringByReplacingMatches(in: text, range: range, withTemplate: template)
+    }
+
+    /// 只压平 `$$…$$` 内部的换行，公式外的文字不动。
+    private static func flattenInsideDisplayMath(_ text: String) -> String {
+        var result = text
+        var searchStart = result.startIndex
+
+        while let open = result.range(of: "$$", range: searchStart..<result.endIndex) {
+            guard let close = result.range(of: "$$", range: open.upperBound..<result.endIndex) else {
+                break
+            }
+            let inner = result[open.upperBound..<close.lowerBound]
+            let flattened = inner
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+
+            result.replaceSubrange(open.upperBound..<close.lowerBound, with: flattened)
+            // 替换后索引失效，从公式结尾之后继续找
+            searchStart = result.index(open.lowerBound, offsetBy: 2 + flattened.count + 2)
+            if searchStart >= result.endIndex { break }
+        }
+        return result
     }
 
     /// 判断一段文字是不是「忘了写 $ 的 LaTeX」。
