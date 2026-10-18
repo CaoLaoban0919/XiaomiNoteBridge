@@ -620,7 +620,11 @@ struct MainView: View {
             aiResizeHandle
 
             aiSection(note)
-                .frame(height: aiPanelHeight)
+                // **上限 440：正文必须先看得见。**
+                // AI 区高度是按"消息条数 × 46"估的，但一条带图表的消息实际有 200pt+，
+                // 估算严重偏低时内容会溢出；而拖过分隔条留下的 override 又可能没有上限。
+                // 这里兜住：不管消息多少，AI 区最多占 440，剩下的给正文。
+                .frame(height: min(aiPanelHeight, 440))
         }
         .navigationTitle(note.title)
         .alert("移到回收站？", isPresented: $confirmingMoveToTrash) {
@@ -1044,7 +1048,8 @@ struct MainView: View {
     private var aiPanelHeight: CGFloat {
 
         if let override = aiHeightOverride {
-            return max(120, override)
+            // 拖动也要有上限，否则向上一直拖会把正文压成零高度
+            return min(max(120, override), 440)
         }
 
         var height: CGFloat = 88
