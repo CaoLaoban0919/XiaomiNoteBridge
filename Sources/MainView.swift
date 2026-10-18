@@ -516,20 +516,10 @@ struct MainView: View {
             // 空时只有一行输入框；有消息后长高；拖拽悬停时再临时加高。
             aiSection(note)
                 .frame(height: aiPanelHeight)
-                // **不加高度过渡动画。**
-                // 附件预览条出现/消失时高度会跳变，配 0.18 秒动画会让整块区域滑一下，
-                // 视觉上像多出一层浮动的面板。高度直接跳，反而干净。
-                .dropDestination(for: URL.self) { urls, _ in
-                    handleDrop(urls, into: .ai)
-                } isTargeted: { targeted in
-                    // 同上：只在轮到自己时才动 `hoveredZone`，
-                    // 否则两个区域的回调会互相覆盖，谁都亮不起来。
-                    if targeted {
-                        hoveredZone = .ai
-                    } else if hoveredZone == .ai {
-                        hoveredZone = nil
-                    }
-                }
+                // **暂时摘掉 dropDestination（排查输入框点不进去）。**
+                // 它会把整块 AI 区变成投放目标，可能拦截鼠标点击——
+                // 笔记区之前就是这个原因导致 hover/选字失效。
+                // 若确认是它，改成只覆盖消息区、不覆盖输入区的投放区。
                 .overlay { dropOverlay(for: .ai) }
         }
         .navigationTitle(note.title)
@@ -961,9 +951,10 @@ struct MainView: View {
             return max(120, override)
         }
 
-        // 68 是下限：输入区自带 padding 与按钮高度，给 56 会装不下、内容被裁，
-        // 看起来就是"错位"。这个数是从 composer 的实际高度量出来的，不要再往下调。
-        var height: CGFloat = 68
+        // 88 是下限：composer 自身需要「上下 padding 32 + 输入框 40」≈ 72，
+        // 给 68 已经超支，输入框会被裁到可视区外——表现就是"点不进去、打不了字"。
+        // 再留 16 点余量给多行输入首行的行高抖动。
+        var height: CGFloat = 88
         // 附件缩略图那一排（44 点 + 上边距）：不加就把预览条裁掉了
         if !chat.pending.isEmpty { height += 60 }
         if !chat.messages.isEmpty {

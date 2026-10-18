@@ -4,6 +4,19 @@ import SwiftUI
 struct MiNoteBridgeApp: App {
     @StateObject private var onboarding = OnboardingState()
 
+    init() {
+        // **防"能点不能打"的一道保险。**
+        //
+        // 用 Xcode / SwiftPM 直接运行时会产出一个**没有 .app 包、没有 Info.plist**
+        // 的裸可执行文件，LaunchServices 把它判成 `BackgroundOnly`：
+        // 窗口能显示、按钮能点（鼠标事件照常投递），但永远成不了 Key 应用，
+        // 键盘事件进不来——所有 TextField 都"点得进去、打不进字"。
+        //
+        // 主动提升为普通前台应用，让裸二进制也能正常接收键盘。
+        // 正常从 .app 启动时这行是无害的（本来就是 .regular）。
+        NSApplication.shared.setActivationPolicy(.regular)
+    }
+
     var body: some Scene {
         WindowGroup("米记桥") {
             RootView()

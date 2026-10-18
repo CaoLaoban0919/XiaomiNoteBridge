@@ -444,15 +444,6 @@ struct AIChatView: View {
             .padding(.horizontal, DS.Space.m)
             .padding(.vertical, DS.Space.s)
             .background(DS.Palette.nest, in: RoundedRectangle(cornerRadius: DS.Radius.m))
-            // **回车发送，⇧↩ 换行。**
-            // 多行 TextField 里回车默认是换行，`.onSubmit` 不会被调用，
-            // 所以要在按键阶段拦：Shift 按住就放行（换行），否则直接发送。
-            .onKeyPress(.return) {
-                // 这个重载不带 KeyPress 参数，修饰键从全局当前状态读
-                if NSEvent.modifierFlags.contains(.shift) { return .ignored }
-                session.send()
-                return .handled
-            }
     }
 
     private var sendButton: some View {
