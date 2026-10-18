@@ -71,7 +71,6 @@ struct WebNoteEditor: NSViewRepresentable {
         // 于是 @media 里的浅色文字规则永远不触发，正文一直用深灰字压在深色底上——
         // 表现就是"深色模式下文字看不见"。nil = 继承窗口的 effectiveAppearance。
         webView.appearance = nil
-
         context.coordinator.webView = webView
         context.coordinator.load(html: html, images: images, editable: isEditable)
         return webView
@@ -186,7 +185,9 @@ final class WebNoteEditorCoordinator: NSObject, WKScriptMessageHandler, WKNaviga
         let prepared = WebNoteHTMLBridge.preparingImagesForDisplay(html, images: images)
         let document = WebNoteHTMLBridge.fullDocument(prepared, editable: editable)
         appliedHash = WebNoteEditor.contentHash(html: html, images: images)
-        webView?.loadHTMLString(document, baseURL: nil)
+        // baseURL 指向 app 的 Resources：KaTeX 的 katex.min.css / .js / fonts
+        // 都放在那里，相对路径才能被 WebView 解析到。
+        webView?.loadHTMLString(document, baseURL: Bundle.main.resourceURL)
     }
 
     func setEditable(_ editable: Bool) {
@@ -393,10 +394,42 @@ enum WebNoteHTMLBridge {
         let editableAttr = editable ? "true" : "false"
         return """
         <!doctype html><html><head><meta charset="utf-8">\
-        <style>\(documentCSS)</style></head>\
-        <body contenteditable="\(editableAttr)">\(body)</body></html>
+        <link rel="stylesheet" href="katex/katex.min.css">\
+        <style>\(documentCSS)</style>\
+        <script src="katex/katex.min.js"></script>\
+        <script src="katex/auto-render.min.js"></script>\
+        </head>\
+        <body contenteditable="\(editableAttr)">\(body)\
+        <script>\(mathRenderJS)</script></body></html>
         """
     }
+
+    /// 扫描正文里的 `$…$` / `$$…$$` 并渲染成公式。
+    ///
+    /// 两个约束：
+    /// 1. `contenteditable="false"` —— 否则用户一点进去改字，WebKit 会把
+    ///    KaTeX 生成的几十层 `<span>` 拆散，公式直接变成乱码。
+    /// 2. `throwOnError: false` —— 写错的公式保留原文，别在正文里炸出一片红字。
+    static let mathRenderJS = """
+    (function() {
+        if (typeof renderMathInElement !== 'function') return;
+        try {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '\\\\[', right: '\\\\]', display: true },
+                    { left: '$', right: '$', display: false },
+                    { left: '\\\\(', right: '\\\\)', display: false }
+                ],
+                throwOnError: false,
+                strict: false
+            });
+            document.querySelectorAll('.katex').forEach(function(el) {
+                el.setAttribute('contenteditable', 'false');
+            });
+        } catch (e) {}
+    })();
+    """
 
     static let documentCSS = """
     :root { color-scheme: light dark; }

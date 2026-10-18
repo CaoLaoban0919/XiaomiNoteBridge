@@ -316,5 +316,13 @@ final class AIChatSession: ObservableObject {
     - `type` 只能是 `pie`（饼图/环形图）或 `bar`（柱状图）。
     - `data` 里每项一个类别，`value` 是数字（占比就传百分数本身，不要带 % 号）。
     - 分类不超过 8 项；超过就合并成「其他」。
+
+    数学公式要求（重要）：
+    - **所有数学公式必须用 LaTeX 包裹：行内用单个 `$…$`，独立成行用 `$$…$$`。**
+    - 客户端内置 KaTeX，会把它渲染成真正的数学排版；不包裹的话只会显示成普通文字。
+    - 例：`$\\int_\\alpha^\\beta f(r\\cos\\theta, r\\sin\\theta)\\,r\\,dr$`
+    - 独立公式例：
+      $$\\iint_D f(x,y)\\,dx\\,dy = \\int_\\alpha^\\beta d\\theta \\int_{r_1(\\theta)}^{r_2(\\theta)} f(r\\cos\\theta, r\\sin\\theta)\\,r\\,dr$$
+    - 不要用 Unicode 上下标（如 `r₁`、`x²`）来代替 LaTeX。
     """
 }

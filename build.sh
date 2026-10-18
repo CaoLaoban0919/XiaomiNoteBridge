@@ -44,6 +44,10 @@ echo "==> 组装 .app"
 cp "$PROJECT_DIR/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$PROJECT_DIR/Resources/首次使用许可.md" "$APP/Contents/Resources/"
 cp "$PROJECT_DIR/Resources/权限清单.md" "$APP/Contents/Resources/"
+# KaTeX：正文公式渲染器（JS + CSS + woff2 字体，约 640KB）
+if [ -d "$PROJECT_DIR/Resources/katex" ]; then
+  cp -R "$PROJECT_DIR/Resources/katex" "$APP/Contents/Resources/"
+fi
 
 echo "==> 生成图标"
 if [ -f "$PROJECT_DIR/Tools/make_icon.swift" ] && [ ! -f "$APP/Contents/Resources/AppIcon.icns" ]; then
