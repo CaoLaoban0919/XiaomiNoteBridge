@@ -9,7 +9,7 @@ cd "$PROJECT_DIR"
 APP_NAME="MiNoteBridge"
 DISPLAY_NAME="米记桥"
 BUNDLE_ID="local.minotebridge.app"
-VERSION="1.0"
+VERSION="1.1"
 BUILD_DIR="$PROJECT_DIR/build"
 APP="$BUILD_DIR/$APP_NAME.app"
 
