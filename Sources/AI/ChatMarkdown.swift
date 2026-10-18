@@ -1,4 +1,21 @@
 import SwiftUI
+import Charts
+
+/// 图表数据。AI 用 ```chart 代码块输出这个结构的 JSON。
+///
+/// 不用 mermaid：渲染它要引 mermaid.js + WebView，为一个饼图挂浏览器内核不划算。
+/// JSON + Swift Charts 是原生绘制，跟随深浅色、能进 SwiftUI 布局，也不增包体积。
+struct ChatChartPayload: Decodable {
+    var type: String          // pie | bar
+    var title: String?
+    var unit: String?
+    var data: [Item]
+
+    struct Item: Decodable {
+        var label: String
+        var value: Double
+    }
+}
 
 struct ChatMarkdown: View {
 
@@ -12,6 +29,7 @@ struct ChatMarkdown: View {
         case code(String)
         case rule
         case table(header: [String], rows: [[String]])
+        case chart(ChatChartPayload)
 
         var id: String {
             switch self {
@@ -21,6 +39,7 @@ struct ChatMarkdown: View {
             case .code(let s): return "code-\(s.prefix(40))"
             case .rule: return "rule"
             case .table(let h, let r): return "table-\(h.joined())-\(r.count)"
+            case .chart(let c): return "chart-\(c.type)-\(c.data.count)"
             }
         }
     }
@@ -29,6 +48,7 @@ struct ChatMarkdown: View {
         var result: [Block] = []
         var paragraph: [String] = []
         var codeLines: [String] = []
+        var codeLanguage = ""
         var inCode = false
         var tableRows: [String] = []
 
@@ -68,10 +88,22 @@ struct ChatMarkdown: View {
                 flushParagraph()
                 flushTable()
                 if inCode {
-                    result.append(.code(codeLines.joined(separator: "\n")))
+                    let body = codeLines.joined(separator: "\n")
+                    // ```chart 的内容按 JSON 解析成图表；
+                    // 解析失败就退回代码块——宁可显示原文，也不能吞掉内容。
+                    if codeLanguage.lowercased() == "chart",
+                       let raw = body.data(using: .utf8),
+                       let payload = try? JSONDecoder().decode(ChatChartPayload.self, from: raw),
+                       !payload.data.isEmpty {
+                        result.append(.chart(payload))
+                    } else {
+                        result.append(.code(body))
+                    }
                     codeLines = []
+                    codeLanguage = ""
                     inCode = false
                 } else {
+                    codeLanguage = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
                     inCode = true
                 }
                 continue
@@ -212,6 +244,9 @@ struct ChatMarkdown: View {
 
                 case .table(let header, let rows):
                     table(header: header, rows: rows)
+
+                case .chart(let payload):
+                    chartView(payload)
                 }
             }
         }
@@ -253,5 +288,50 @@ struct ChatMarkdown: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.035),
                     in: RoundedRectangle(cornerRadius: DS.Radius.s))
+    }
+
+    @ViewBuilder
+    private func chartView(_ payload: ChatChartPayload) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            if let title = payload.title, !title.isEmpty {
+                Text(title)
+                    .font(.system(size: bodySize, weight: .semibold))
+            }
+
+            Chart(payload.data, id: \.label) { item in
+                if payload.type.lowercased() == "bar" {
+                    BarMark(
+                        x: .value("类别", item.label),
+                        y: .value("数值", item.value)
+                    )
+                    .foregroundStyle(by: .value("类别", item.label))
+                } else {
+                    SectorMark(
+                        angle: .value("数值", item.value),
+                        innerRadius: .ratio(0.45),
+                        angularInset: 1.5
+                    )
+                    .foregroundStyle(by: .value("类别", item.label))
+                    .annotation(position: .overlay) {
+                        // 太小的扇区标数字会挤成一团，只给占比 > 8% 的加标注
+                        if item.value / totalOf(payload) > 0.08 {
+                            Text("\(Int(item.value.rounded()))")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
+            }
+            .chartLegend(position: .bottom, alignment: .leading)
+            .frame(height: 200)
+        }
+        .padding(DS.Optical.control)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.035),
+                    in: RoundedRectangle(cornerRadius: DS.Radius.s))
+    }
+
+    private func totalOf(_ payload: ChatChartPayload) -> Double {
+        max(payload.data.reduce(0) { $0 + $1.value }, 0.001)
     }
 }
