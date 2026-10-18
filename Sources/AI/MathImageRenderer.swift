@@ -23,8 +23,11 @@ enum MathImageRenderer {
         <link rel="stylesheet" href="katex/katex.min.css">
         <style>
         html, body { margin: 0; padding: 0; background: transparent; }
-        body { display: inline-block; padding: 6px 10px; }
-        .katex { font-size: \(display ? 18 : 15)px; }
+        /* **中灰而不是黑。**
+           截图是透明背景的 PNG，黑色文字在深色模式下等于隐形；
+           纯白又在浅色模式下隐形。中灰是唯一两个模式都能读的颜色。 */
+        body { display: inline-block; padding: 6px 10px; color: #8A8A8E; }
+        .katex { font-size: \(display ? 18 : 15)px; color: inherit; }
         </style>
         <script src="katex/katex.min.js"></script>
         <script src="katex/auto-render.min.js"></script>
@@ -113,7 +116,7 @@ enum MathImageRenderer {
                 result = head + rest
                 continue
             }
-            let img = "<img src=\"\(dataURL)\" style=\"max-width:100%;\">"
+            let img = "<img src=\"\(dataURL)\" style=\"max-width:100%;max-height:140px;display:block;margin:8px 0;\">"
             result.replaceSubrange(start.lowerBound..<end.upperBound, with: img)
         }
         return result

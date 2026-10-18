@@ -146,9 +146,9 @@ enum AITextToHTML {
         guard total > 0 else { return "" }
 
         let width = 640.0
-        let height = 260.0
+        let height = 200.0
         let center = height / 2
-        let outer = 96.0
+        let outer = 76.0
         let inner = outer * 0.62          // 环宽 = 38% 半径，比 45% 更轻
         let gap = 0.9                     // 扇区间隙（度），代替白色描边
         let title = escape(payload.title ?? "")
